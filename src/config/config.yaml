@@ -1,5 +1,5 @@
 data:
-  root_dir: "../../data"
+  root_dir: "../data"
   train: "train"
   val: "val"
   batch_size: 32
