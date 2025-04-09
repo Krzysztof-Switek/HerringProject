@@ -1,0 +1,18 @@
+data:
+  root_dir: "../../data"
+  train: "train"
+  val: "val"
+  batch_size: 32
+  image_size: 224
+
+model:
+  base_model: "resnet50"
+  num_classes: 5
+  pretrained: True
+  freeze_encoder: False
+
+training:
+  epochs: 50
+  learning_rate: 0.001
+  device: "cuda:0"
+  checkpoint_dir: "../../checkpoints"
