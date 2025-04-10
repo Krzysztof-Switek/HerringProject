@@ -189,6 +189,10 @@ class Trainer:
 
     def train(self):
         """Główna pętla treningowa"""
+
+        last_conv_layer = self._get_last_conv_layer_name()
+        print(f"\nLast convolutional layer: {last_conv_layer}")
+
         train_loader, val_loader, class_names = self.data_loader.get_loaders()
 
         # Konfiguracja treningu
@@ -235,6 +239,14 @@ class Trainer:
 
         if self.writer:
             self.writer.close()
+
+    def _get_last_conv_layer_name(self):
+        """Funkcja do znalezienia nazwy ostatniej warstwy konwolucyjnej"""
+        last_conv_layer = None
+        for name, module in self.model.named_modules():
+            if isinstance(module, nn.Conv2d):
+                last_conv_layer = name  # Zapamiętaj nazwę ostatniej warstwy konwolucyjnej
+        return last_conv_layer
 
 
 if __name__ == "__main__":

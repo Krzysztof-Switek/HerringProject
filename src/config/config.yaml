@@ -1,19 +1,32 @@
 data:
-  root_dir: "data"
-  train: "train"
-  val: "val"
+  root_dir: "../../data"                        # główny katalog danych
+  train: "train"                                # podkatalog treningowy
+  val: "val"                                    # podkatalog walidacyjny
+  test: "test"                                  # podkatalog testowy
   batch_size: 32
-  image_size: 224
+  image_size: 224                               # rozmiar wejściowy dla modelu
 
 model:
-  base_model: "resnet50"
+  base_model: "resnet50"                        # backbone np. resnet50, vgg16 itp.
   num_classes: 2
-  pretrained: True
-  freeze_encoder: False         # Set True for transfer learning
-  dropout_rate: 0.5             # współczynnik dropout (np. 0.5 lub 0.3, albo 0.0 żeby wyłączyć)
+  pretrained: true
+  freeze_encoder: false
+  dropout_rate: 0.5
 
 training:
   epochs: 50
   learning_rate: 0.001
   device: "auto"
-  checkpoint_dir: "../../checkpoints"
+  checkpoint_dir: "../../checkpoints"           # miejsce zapisu modelu
+
+gradcam:
+  target_layer: "base.layer4.2.conv3"              # warstwa dla Grad-CAM
+  colormap: "jet"                               # mapa kolorów dla heatmapy
+  alpha: 0.5                                    # przezroczystość heatmapy
+
+prediction:
+  model_path: "checkpoints/best_model_epoch_5_acc_80.20.pth"
+  image_path: "data/test/Głębia_Gdańska_0013_otsu_OBRYS_1.jpg"
+  results_dir: "results/gradcam"
+  show_visualization: true
+  save_results: true                            # czy wyświetlać wykresy matplotlib

@@ -1,47 +1,91 @@
 import torch
-import cv2
 import numpy as np
+import cv2
 
 
 class GradCAM:
-    def __init__(self, model, target_layer):
+    def __init__(self, model, target_layer: str):
+        """
+        Inicjalizacja Grad-CAM dla określonej warstwy modelu
+
+        Args:
+            model: Wytrenowany model
+            target_layer: Nazwa warstwy docelowej (np. "layer4[-1].conv3")
+        """
         self.model = model
         self.target_layer = target_layer
         self.activations = None
         self.gradients = None
 
+        # Rejestracja hooków
         self._register_hooks()
 
     def _register_hooks(self):
+        """Rejestracja hooków dla przechwytywania aktywacji i gradientów"""
+        target_layer = self._find_target_layer()
+
         def forward_hook(module, input, output):
-            self.activations = output
+            self.activations = output.detach()
 
         def backward_hook(module, grad_input, grad_output):
-            self.gradients = grad_output[0]
+            self.gradients = grad_output[0].detach()
 
-        self.target_layer.register_forward_hook(forward_hook)
-        self.target_layer.register_full_backward_hook(backward_hook)
+        self.forward_handle = target_layer.register_forward_hook(forward_hook)
+        self.backward_handle = target_layer.register_backward_hook(backward_hook)
 
-    def generate(self, input_tensor, class_idx=None):
-        self.model.zero_grad()
+    def _find_target_layer(self):
+        """Znajdowanie warstwy docelowej na podstawie nazwy"""
+        module = self.model
+        try:
+            for layer in self.target_layer.split('.'):
+                if '[' in layer:
+                    layer_name = layer[:layer.find('[')]
+                    index = int(layer[layer.find('[') + 1:layer.find(']')])
+                    module = getattr(module, layer_name)[index]
+                else:
+                    module = getattr(module, layer)
+            return module
+        except AttributeError:
+            raise ValueError(f"Could not find target layer: {self.target_layer}")
+
+    def generate(self, input_tensor, class_idx: int):
+        """
+        Generowanie heatmapy Grad-CAM
+
+        Args:
+            input_tensor: Tensor wejściowy (1, C, H, W)
+            class_idx: Indeks klasy docelowej
+
+        Returns:
+            heatmap: Normalizowana mapa aktywacji (H, W)
+        """
+        # 1. Forward pass
         output = self.model(input_tensor)
+        if class_idx >= output.size(1):
+            raise ValueError(f"Class index {class_idx} out of range")
 
-        if class_idx is None:
-            class_idx = output.argmax().item()
-
+        # 2. Zerowanie gradientów i backward pass
+        self.model.zero_grad()
         one_hot = torch.zeros_like(output)
-        one_hot[0][class_idx] = 1
+        one_hot[0, class_idx] = 1
         output.backward(gradient=one_hot, retain_graph=True)
 
-        pooled_grads = torch.mean(self.gradients, dim=[0, 2, 3])
+        # 3. Obliczanie ważonych aktywacji
+        pooled_gradients = torch.mean(self.gradients, dim=[0, 2, 3])
         activations = self.activations[0]
 
-        for i in range(activations.shape[0]):
-            activations[i] *= pooled_grads[i]
+        for i in range(activations.size(0)):
+            activations[i] *= pooled_gradients[i]
 
-        heatmap = torch.mean(activations, dim=0).detach().cpu().numpy()
+        heatmap = torch.mean(activations, dim=0).cpu().numpy()
         heatmap = np.maximum(heatmap, 0)
-        heatmap = cv2.resize(heatmap, (input_tensor.shape[3], input_tensor.shape[2]))
-        heatmap = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
+        heatmap = (heatmap - np.min(heatmap)) / (np.max(heatmap) - np.min(heatmap) + 1e-8)
 
         return heatmap
+
+    def __del__(self):
+        """Usuwanie hooków przy niszczeniu obiektu"""
+        if hasattr(self, 'forward_handle'):
+            self.forward_handle.remove()
+        if hasattr(self, 'backward_handle'):
+            self.backward_handle.remove()
