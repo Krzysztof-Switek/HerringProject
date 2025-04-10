@@ -1,5 +1,5 @@
 data:
-  root_dir: "../data"
+  root_dir: "data"
   train: "train"
   val: "val"
   batch_size: 32
@@ -7,12 +7,12 @@ data:
 
 model:
   base_model: "resnet50"
-  num_classes: 5
+  num_classes: 2
   pretrained: True
-  freeze_encoder: False
+  freeze_encoder: False  # Set True for transfer learning
 
 training:
   epochs: 50
   learning_rate: 0.001
-  device: "cuda:0"
+  device: "auto"
   checkpoint_dir: "../../checkpoints"

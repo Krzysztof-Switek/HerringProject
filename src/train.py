@@ -2,62 +2,120 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.tensorboard import SummaryWriter
+from pathlib import Path
 from omegaconf import OmegaConf
+from torch.utils.tensorboard import SummaryWriter
 from data_loader.dataset import HerringDataset
 from models.model import HerringModel
 
 
 class Trainer:
-    def __init__(self, config_path: str = "../src/config/config.yaml"):
+    def __init__(self, config_path: str = None):
         """
-        Inicjalizacja trenera dla struktury HerringProject
-
+        Inicjalizacja trenera dla struktury projektu HerringProject
         Args:
-            config_path: Ścieżka do pliku konfiguracyjnego (względem lokalizacji train.py)
+            config_path: Opcjonalna ścieżka do konfiguracji
         """
-        # Ładowanie konfiguracji
-        self.cfg = OmegaConf.load(os.path.join(os.path.dirname(__file__), config_path))
-        self.device = torch.device(self.cfg.training.device)
+        # 1. Inicjalizacja ścieżek
+        self.project_root = Path(__file__).parent.parent
+        print(f"\nProject root: {self.project_root}")
 
-        # Inicjalizacja komponentów
-        self._init_directories()
+        # 2. Ładowanie konfiguracji
+        self.cfg = self._load_config(config_path)
+
+        # 3. Inicjalizacja urządzenia
+        self.device = self._init_device()
+        print(f"Using device: {self.device}")
+
+        # 4. Weryfikacja struktury danych
+        self._validate_data_structure()
+
+        # 5. Inicjalizacja komponentów
         self.model = HerringModel(self.cfg).to(self.device)
         self.data_loader = HerringDataset(self.cfg)
-        self.writer = SummaryWriter(log_dir="../results/logs")
+        self.writer = self._init_tensorboard()
 
-        # Ścieżki bezwzględne dla przejrzystości
-        self.train_dir = os.path.abspath(os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            self.cfg.data.root_dir,
-            self.cfg.data.train
-        ))
-        self.val_dir = os.path.abspath(os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            self.cfg.data.root_dir,
-            self.cfg.data.val
-        ))
+    def _load_config(self, config_path):
+        """Ładowanie konfiguracji z automatyczną korektą ścieżek"""
+        if config_path is None:
+            config_path = self.project_root / "src" / "config" / "config.yaml"
 
-    def _init_directories(self):
-        """Inicjalizacja wymaganych katalogów"""
-        os.makedirs(os.path.join(os.path.dirname(__file__), "../checkpoints"), exist_ok=True)
-        os.makedirs(os.path.join(os.path.dirname(__file__), "../results/logs"), exist_ok=True)
+        if not Path(config_path).exists():
+            raise FileNotFoundError(f"Config file not found at: {config_path}")
 
-    def _validate_paths(self):
-        """Weryfikacja struktury danych"""
-        if not os.path.exists(self.train_dir):
-            raise FileNotFoundError(f"Nie znaleziono katalogu treningowego: {self.train_dir}")
-        if not os.path.exists(self.val_dir):
-            raise FileNotFoundError(f"Nie znaleziono katalogu walidacyjnego: {self.val_dir}")
+        cfg = OmegaConf.load(config_path)
+
+        # Aktualizacja ścieżek w konfiguracji
+        cfg.data.root_dir = str(self.project_root / "data")
+        return cfg
+
+    def _init_device(self):
+        """Inicjalizacja urządzenia z pełną obsługą CPU/GPU"""
+        if torch.cuda.is_available():
+            try:
+                device = torch.device("cuda")
+                # Testowe wykonanie operacji na GPU
+                _ = torch.tensor([1.0]).to(device)
+                return device
+            except Exception as e:
+                print(f"Warning: GPU initialization failed. Falling back to CPU. Error: {str(e)}")
+
+        return torch.device("cpu")
+
+    def _validate_data_structure(self):
+        """Pełna weryfikacja struktury katalogów danych"""
+        print("\nValidating data structure...")
+
+        # Ścieżki do katalogów
+        train_dir = self.project_root / "data" / "train"
+        val_dir = self.project_root / "data" / "val"
+
+        # Sprawdzenie istnienia głównych katalogów
+        required_dirs = {
+            "train": train_dir,
+            "val": val_dir
+        }
+
+        for name, dir_path in required_dirs.items():
+            if not dir_path.exists():
+                raise FileNotFoundError(
+                    f"Directory '{name}' not found at: {dir_path}\n"
+                    f"Expected structure:\n"
+                    f"data/\n"
+                    f"├── train/\n"
+                    f"│   ├── 1/\n"
+                    f"│   └── 2/\n"
+                    f"└── val/\n"
+                    f"    ├── 1/\n"
+                    f"    └── 2/"
+                )
+
+            # Sprawdzenie podkatalogów klas
+            class_dirs = [d for d in dir_path.iterdir() if d.is_dir()]
+            if not class_dirs:
+                raise FileNotFoundError(
+                    f"No class directories found in {dir_path}\n"
+                    f"Each directory should contain subdirectories '1/' and '2/'"
+                )
+
+            print(f"Found {len(class_dirs)} class directories in {name}")
+
+        print("Data structure validation passed successfully")
+
+    def _init_tensorboard(self):
+        """Inicjalizacja TensorBoard z obsługą błędów"""
+        log_dir = self.project_root / "results" / "logs"
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            return SummaryWriter(log_dir=str(log_dir))
+        except Exception as e:
+            print(f"Warning: TensorBoard initialization failed. Error: {str(e)}")
+            return None
 
     def _train_epoch(self, train_loader, optimizer, criterion, epoch):
         """Pojedyncza epoka treningowa"""
         self.model.train()
-        running_loss = 0.0
-        correct = 0
-        total = 0
+        stats = {'loss': 0.0, 'correct': 0, 'total': 0}
 
         for batch_idx, (inputs, targets) in enumerate(train_loader):
             inputs, targets = inputs.to(self.device), targets.to(self.device)
@@ -68,29 +126,28 @@ class Trainer:
             loss.backward()
             optimizer.step()
 
-            running_loss += loss.item()
+            # Aktualizacja statystyk
+            stats['loss'] += loss.item()
             _, predicted = outputs.max(1)
-            total += targets.size(0)
-            correct += predicted.eq(targets).sum().item()
+            stats['total'] += targets.size(0)
+            stats['correct'] += predicted.eq(targets).sum().item()
 
             if batch_idx % 10 == 0:
                 print(f"Epoch: {epoch} | Batch: {batch_idx}/{len(train_loader)} | Loss: {loss.item():.4f}")
 
-        epoch_loss = running_loss / len(train_loader)
-        epoch_acc = 100. * correct / total
+        epoch_loss = stats['loss'] / len(train_loader)
+        epoch_acc = 100. * stats['correct'] / stats['total']
 
-        # Logowanie do TensorBoard
-        self.writer.add_scalar("Loss/train", epoch_loss, epoch)
-        self.writer.add_scalar("Accuracy/train", epoch_acc, epoch)
+        if self.writer:
+            self.writer.add_scalar("Loss/train", epoch_loss, epoch)
+            self.writer.add_scalar("Accuracy/train", epoch_acc, epoch)
 
         return epoch_loss, epoch_acc
 
     def _validate(self, val_loader, criterion, epoch):
         """Walidacja modelu"""
         self.model.eval()
-        val_loss = 0.0
-        correct = 0
-        total = 0
+        stats = {'loss': 0.0, 'correct': 0, 'total': 0}
 
         with torch.no_grad():
             for inputs, targets in val_loader:
@@ -98,23 +155,40 @@ class Trainer:
                 outputs = self.model(inputs)
                 loss = criterion(outputs, targets)
 
-                val_loss += loss.item()
+                stats['loss'] += loss.item()
                 _, predicted = outputs.max(1)
-                total += targets.size(0)
-                correct += predicted.eq(targets).sum().item()
+                stats['total'] += targets.size(0)
+                stats['correct'] += predicted.eq(targets).sum().item()
 
-        val_loss /= len(val_loader)
-        val_acc = 100. * correct / total
+        val_loss = stats['loss'] / len(val_loader)
+        val_acc = 100. * stats['correct'] / stats['total']
 
-        # Logowanie do TensorBoard
-        self.writer.add_scalar("Loss/val", val_loss, epoch)
-        self.writer.add_scalar("Accuracy/val", val_acc, epoch)
+        if self.writer:
+            self.writer.add_scalar("Loss/val", val_loss, epoch)
+            self.writer.add_scalar("Accuracy/val", val_acc, epoch)
 
         return val_loss, val_acc
 
+    def _save_checkpoint(self, epoch, optimizer, val_acc, class_names):
+        """Zapis checkpointu modelu"""
+        checkpoint_dir = self.project_root / "checkpoints"
+        checkpoint_dir.mkdir(exist_ok=True)
+
+        checkpoint_path = checkpoint_dir / f"best_model_epoch_{epoch}_acc_{val_acc:.2f}.pth"
+
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'val_acc': val_acc,
+            'class_names': class_names,
+            'config': OmegaConf.to_container(self.cfg)
+        }, str(checkpoint_path))
+
+        return checkpoint_path
+
     def train(self):
         """Główna pętla treningowa"""
-        self._validate_paths()
         train_loader, val_loader, class_names = self.data_loader.get_loaders()
 
         # Konfiguracja treningu
@@ -124,11 +198,19 @@ class Trainer:
             lr=self.cfg.training.learning_rate,
             weight_decay=1e-4
         )
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.cfg.training.epochs)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=self.cfg.training.epochs
+        )
 
-        print(f"Rozpoczynanie treningu na {len(train_loader.dataset)} obrazach treningowych")
-        print(f"Walidacja na {len(val_loader.dataset)} obrazach")
-        print(f"Klasy: {class_names}")
+        print("\nStarting training with configuration:")
+        print(f"- Model: {self.cfg.model.base_model}")
+        print(f"- Classes: {class_names}")
+        print(f"- Training samples: {len(train_loader.dataset)}")
+        print(f"- Validation samples: {len(val_loader.dataset)}")
+        print(f"- Epochs: {self.cfg.training.epochs}")
+        print(f"- Batch size: {self.cfg.data.batch_size}")
+        print(f"- Learning rate: {self.cfg.training.learning_rate}\n")
 
         best_acc = 0.0
         for epoch in range(self.cfg.training.epochs):
@@ -136,36 +218,40 @@ class Trainer:
             val_loss, val_acc = self._validate(val_loader, criterion, epoch)
             scheduler.step()
 
-            print(f"Epoch {epoch + 1}/{self.cfg.training.epochs} | "
-                  f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}% | "
-                  f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.2f}%")
+            print(f"Epoch {epoch + 1}/{self.cfg.training.epochs} || "
+                  f"Train Loss: {train_loss:.4f} | Acc: {train_acc:.2f}% || "
+                  f"Val Loss: {val_loss:.4f} | Acc: {val_acc:.2f}%")
 
-            # Zapis checkpointu
             if val_acc > best_acc:
                 best_acc = val_acc
-                checkpoint_path = os.path.join(
-                    os.path.dirname(__file__),
-                    "../checkpoints",
-                    f"best_model_epoch_{epoch + 1}_acc_{val_acc:.2f}.pth"
+                checkpoint_path = self._save_checkpoint(
+                    epoch + 1, optimizer, val_acc, class_names
                 )
-                torch.save({
-                    'epoch': epoch + 1,
-                    'model_state_dict': self.model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'val_acc': val_acc,
-                    'class_names': class_names
-                }, checkpoint_path)
-                print(f"Zapisano najlepszy model: {checkpoint_path}")
+                print(f"Saved best model to: {checkpoint_path}")
 
-        self.writer.close()
+        if self.writer:
+            self.writer.close()
 
 
 if __name__ == "__main__":
-    print("Inicjalizacja trenera...")
-    trainer = Trainer()
+    print("==== Herring Otolith Classification Training ====")
+    try:
+        trainer = Trainer()
 
-    print("\nStatystyki danych:")
-    trainer.data_loader.show_stats()
+        print("\nData statistics:")
+        trainer.data_loader.show_stats()
 
-    print("\nRozpoczynanie treningu...")
-    trainer.train()
+        print("\nStarting training...")
+        trainer.train()
+
+    except Exception as e:
+        print(f"\nError during training initialization: {str(e)}")
+        print("\nPlease verify your directory structure:")
+        print("1. Ensure all required directories exist:")
+        print("   - data/train/1/")
+        print("   - data/train/2/")
+        print("   - data/val/1/")
+        print("   - data/val/2/")
+        print("2. Each class directory should contain image files")
+        print("3. Check config.yaml paths are correct")
+        raise
