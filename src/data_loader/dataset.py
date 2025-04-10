@@ -8,22 +8,28 @@ from omegaconf import DictConfig
 class HerringDataset:
     def __init__(self, config: DictConfig):
         """
-        Inicjalizacja ładowania danych z walidacją ścieżek
+        Inicjalizacja ładowania danych dla struktury projektu HerringProject
 
         Args:
-            config: Konfiguracja projektu (omegaconf.DictConfig)
+            config: Konfiguracja z pliku config.yaml
         """
         self.cfg = config.data
-        self.transform = self._get_transforms()
         self._validate_paths()
+        self.train_transform = self._get_train_transforms()
+        self.val_transform = self._get_val_transforms()
 
-    def _get_transforms(self) -> transforms.Compose:
-        """
-        Definiuje transformacje dla danych treningowych i walidacyjnych
+    def _get_train_transforms(self) -> transforms.Compose:
+        """Transformacje z augmentacją dla danych treningowych"""
+        return transforms.Compose([
+            transforms.RandomResizedCrop(self.cfg.image_size),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406],
+                                 [0.229, 0.224, 0.225])
+        ])
 
-        Returns:
-            transforms.Compose: Zestaw transformacji
-        """
+    def _get_val_transforms(self) -> transforms.Compose:
+        """Transformacje bez augmentacji dla danych walidacyjnych"""
         return transforms.Compose([
             transforms.Resize(self.cfg.image_size),
             transforms.CenterCrop(self.cfg.image_size),
@@ -33,27 +39,22 @@ class HerringDataset:
         ])
 
     def _validate_paths(self):
-        """Weryfikuje istnienie wymaganych katalogów i klas"""
-        required_dirs = [
-            os.path.join(self.cfg.root_dir, self.cfg.train),
-            os.path.join(self.cfg.root_dir, self.cfg.val)
-        ]
+        """Weryfikacja struktury katalogów danych"""
+        base_path = os.path.join(os.path.dirname(__file__), '../../..', self.cfg.root_dir)
+        required_paths = {
+            'train': os.path.join(base_path, 'train'),
+            'val': os.path.join(base_path, 'val')
+        }
 
-        for dir_path in required_dirs:
-            if not os.path.exists(dir_path):
+        for name, path in required_paths.items():
+            if not os.path.exists(path):
                 raise FileNotFoundError(
-                    f"Katalog danych {dir_path} nie istnieje. "
-                    f"Upewnij się że wykonałeś podział danych."
+                    f"Nie znaleziono katalogu {name}: {path}\n"
+                    f"Pełna ścieżka: {os.path.abspath(path)}"
                 )
 
-            # Sprawdź czy są podkatalogi klas
-            subdirs = [d for d in os.listdir(dir_path)
-                       if os.path.isdir(os.path.join(dir_path, d))]
-            if not subdirs:
-                raise RuntimeError(
-                    f"Brak podkatalogów klas w {dir_path}. "
-                    f"Oczekiwano strukturę: {dir_path}/1/, {dir_path}/2/"
-                )
+            if not os.listdir(path):
+                raise RuntimeError(f"Katalog {name} jest pusty: {path}")
 
     def get_loaders(self) -> tuple:
         """
@@ -62,25 +63,19 @@ class HerringDataset:
         Returns:
             tuple: (train_loader, val_loader, class_names)
         """
-        train_dir = os.path.join(self.cfg.root_dir, self.cfg.train)
-        val_dir = os.path.join(self.cfg.root_dir, self.cfg.val)
+        base_path = os.path.join(os.path.dirname(__file__), '../../..')
+        train_dir = os.path.join(base_path, self.cfg.root_dir, 'train')
+        val_dir = os.path.join(base_path, self.cfg.root_dir, 'val')
 
-        train_set = datasets.ImageFolder(train_dir, self.transform)
-        val_set = datasets.ImageFolder(val_dir, self.transform)
-
-        # Weryfikacja spójności klas
-        if train_set.classes != val_set.classes:
-            raise ValueError(
-                "Niespójne klasy między zestawem treningowym a walidacyjnym. "
-                f"Train classes: {train_set.classes}, Val classes: {val_set.classes}"
-            )
+        train_set = datasets.ImageFolder(train_dir, self.train_transform)
+        val_set = datasets.ImageFolder(val_dir, self.val_transform)
 
         train_loader = DataLoader(
             train_set,
             batch_size=self.cfg.batch_size,
             shuffle=True,
             num_workers=2,
-            pin_memory=True if torch.cuda.is_available() else False
+            pin_memory=torch.cuda.is_available()
         )
 
         val_loader = DataLoader(
@@ -88,34 +83,34 @@ class HerringDataset:
             batch_size=self.cfg.batch_size,
             shuffle=False,
             num_workers=2,
-            pin_memory=True if torch.cuda.is_available() else False
+            pin_memory=torch.cuda.is_available()
         )
 
         return train_loader, val_loader, train_set.classes
 
-    def get_class_distribution(self) -> dict:
-        """
-        Zwraca rozkład klas w danych treningowych i walidacyjnych
+    def show_stats(self):
+        """Wyświetla statystyki danych"""
+        base_path = os.path.join(os.path.dirname(__file__), '../../..')
+        train_dir = os.path.join(base_path, self.cfg.root_dir, 'train')
+        val_dir = os.path.join(base_path, self.cfg.root_dir, 'val')
 
-        Returns:
-            dict: {
-                'train': {class1: count, class2: count},
-                'val': {class1: count, class2: count}
-            }
-        """
-        train_dir = os.path.join(self.cfg.root_dir, self.cfg.train)
-        val_dir = os.path.join(self.cfg.root_dir, self.cfg.val)
-
-        train_dist = {
+        train_counts = {
             cls: len(os.listdir(os.path.join(train_dir, cls)))
             for cls in os.listdir(train_dir)
             if os.path.isdir(os.path.join(train_dir, cls))
         }
 
-        val_dist = {
+        val_counts = {
             cls: len(os.listdir(os.path.join(val_dir, cls)))
             for cls in os.listdir(val_dir)
             if os.path.isdir(os.path.join(val_dir, cls))
         }
 
-        return {'train': train_dist, 'val': val_dist}
+        print("\nStatystyki danych:")
+        print(f"Treningowe: {sum(train_counts.values())} obrazów")
+        for cls, count in train_counts.items():
+            print(f"  Klasa {cls}: {count}")
+
+        print(f"\nWalidacyjne: {sum(val_counts.values())} obrazów")
+        for cls, count in val_counts.items():
+            print(f"  Klasa {cls}: {count}")
