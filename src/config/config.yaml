@@ -9,7 +9,8 @@ model:
   base_model: "resnet50"
   num_classes: 2
   pretrained: True
-  freeze_encoder: False  # Set True for transfer learning
+  freeze_encoder: False         # Set True for transfer learning
+  dropout_rate: 0.5             # współczynnik dropout (np. 0.5 lub 0.3, albo 0.0 żeby wyłączyć)
 
 training:
   epochs: 50

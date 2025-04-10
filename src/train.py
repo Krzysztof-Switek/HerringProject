@@ -204,13 +204,17 @@ class Trainer:
         )
 
         print("\nStarting training with configuration:")
-        print(f"- Model: {self.cfg.model.base_model}")
-        print(f"- Classes: {class_names}")
-        print(f"- Training samples: {len(train_loader.dataset)}")
+        print(f"- Base model:         {self.cfg.model.base_model}")
+        print(f"- Pretrained:         {self.cfg.model.pretrained}")
+        print(f"- Freeze encoder:     {self.cfg.model.freeze_encoder}")
+        print(f"- Dropout rate:       {getattr(self.cfg.model, 'dropout_rate', 0.0)}")
+        print(f"- Num classes:        {self.cfg.model.num_classes}")
+        print(f"- Epochs:             {self.cfg.training.epochs}")
+        print(f"- Batch size:         {self.cfg.data.batch_size}")
+        print(f"- Learning rate:      {self.cfg.training.learning_rate}")
+        print(f"- Training samples:   {len(train_loader.dataset)}")
         print(f"- Validation samples: {len(val_loader.dataset)}")
-        print(f"- Epochs: {self.cfg.training.epochs}")
-        print(f"- Batch size: {self.cfg.data.batch_size}")
-        print(f"- Learning rate: {self.cfg.training.learning_rate}\n")
+        print(f"- Class labels:       {class_names}\n")
 
         best_acc = 0.0
         for epoch in range(self.cfg.training.epochs):
