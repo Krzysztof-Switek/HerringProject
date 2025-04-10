@@ -27,11 +27,13 @@ class GradCAM:
         def forward_hook(module, input, output):
             self.activations = output.detach()
 
+        # Zmieniamy backward hook na pełny backward hook
         def backward_hook(module, grad_input, grad_output):
             self.gradients = grad_output[0].detach()
 
+        # Zmiana: użycie register_full_backward_hook zamiast register_backward_hook
         self.forward_handle = target_layer.register_forward_hook(forward_hook)
-        self.backward_handle = target_layer.register_backward_hook(backward_hook)
+        self.backward_handle = target_layer.register_full_backward_hook(backward_hook)
 
     def _find_target_layer(self):
         """Znajdowanie warstwy docelowej na podstawie nazwy"""

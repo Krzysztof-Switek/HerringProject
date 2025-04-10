@@ -115,40 +115,49 @@ class Predictor:
         # 2. Tworzenie heatmapy
         colormap = plt.get_cmap(self.cfg['gradcam']['colormap'])
         heatmap = (heatmap * 255).astype(np.uint8)
-        heatmap = colormap(heatmap)[:, :, :3] * 255
+        heatmap = colormap(heatmap)[:, :, :3] * 255  # heatmap w zakresie [0..255]
 
-        # 3. Nałożenie heatmapy
+        # 3. Nałożenie heatmapy na oryginalny obraz
         superimposed_img = (original_img * (1 - self.cfg['gradcam']['alpha']) +
                             heatmap * self.cfg['gradcam']['alpha'])
-        superimposed_img = np.clip(superimposed_img, 0, 255).astype(np.uint8)
 
-        # 4. Wyświetlenie
+        # 4. Jawna normalizacja do zakresu [0, 1] (dla float)
+        superimposed_img = np.clip(superimposed_img, 0, 255).astype(np.float32) / 255.0  # <-- KLUCZOWA ZMIANA
+
+        # 5. Wyświetlenie
         if self.cfg['prediction']['show_visualization']:
             plt.figure(figsize=(15, 5))
 
             plt.subplot(1, 3, 1)
-            plt.imshow(original_img)
+            plt.imshow(original_img / 255.0)  # Normalizacja oryginalnego obrazu
             plt.title("Original Image")
             plt.axis('off')
 
             plt.subplot(1, 3, 2)
-            plt.imshow(heatmap)
+            plt.imshow(heatmap / 255.0)  # Normalizacja heatmapy
             plt.title("Grad-CAM Heatmap")
             plt.axis('off')
 
             plt.subplot(1, 3, 3)
-            plt.imshow(superimposed_img)
+            plt.imshow(superimposed_img)  # Teraz w zakresie [0, 1]
             plt.title(f"Predicted: {pred_class}\nConfidence: {confidence:.1f}%")
             plt.axis('off')
 
             plt.tight_layout()
             plt.show()
 
-        # 5. Zapis wyników
+        # 6. Zapis wyników
         if self.cfg['prediction']['save_results']:
             output_path = results_dir / f"gradcam_{Path(self.cfg['prediction']['image_path']).stem}.png"
-            plt.imsave(output_path, superimposed_img)
+            plt.imsave(output_path, superimposed_img)  # .imsave automatycznie obsługuje zakres [0,1]
             print(f"\nResults saved to: {output_path}")
+
+    def _fix_imshow_range(self, img):
+        """Przekształcenie wartości obrazu do zakresu [0, 1]"""
+        # Zmiana zakresu wartości obrazu, jeśli jest większy niż 1
+        if img.max() > 1:
+            img = img / 255.0  # Zmiana zakresu dla floatów
+        return img
 
 
 if __name__ == "__main__":
