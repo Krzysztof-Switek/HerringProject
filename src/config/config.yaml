@@ -7,11 +7,20 @@ data:
   image_size: 224                               # rozmiar wejściowy dla modelu
 
 model:
-  base_model: "resnet50"                        # backbone np. resnet50, vgg16 itp.
+  base_model: "resnet50"                        # image_size: 224.
   num_classes: 2
   pretrained: true
   freeze_encoder: false
   dropout_rate: 0.5
+
+######################### ALTERNATYWNE MODELE ###########################
+#                                                                       #
+#  base_model: "convnext_large"                 # image_size: 384       #
+#  base_model: "vit_h_14"                       # image_size: 384       #
+#  base_model: "efficientnetv2_l"               # image_size: 480       #
+#  base_model: "regnety_032"                    # image_size: 384       #
+#                                                                       #
+######################### ALTERNATYWNE MODELE ###########################
 
 training:
   epochs: 50
@@ -25,7 +34,7 @@ gradcam:
   alpha: 0.5                                    # przezroczystość heatmapy
 
 prediction:
-  model_path: "checkpoints/best_model_epoch_5_acc_80.20.pth"
+  model_path: "checkpoints/best_model_epoch_97_acc_89.11.pth"
   image_path: "data/test/Głębia_Gdańska_0013_otsu_OBRYS_1.jpg"
   results_dir: "results/gradcam"
   show_visualization: true
