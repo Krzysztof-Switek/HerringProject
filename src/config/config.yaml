@@ -39,3 +39,11 @@ prediction:
   results_dir: "results/gradcam"
   show_visualization: true
   save_results: true                            # czy wyświetlać wykresy matplotlib
+
+prediction_modes:
+  mode: "single"  # "single" lub "batch"
+  batch:
+    num_images: 4  # liczba obrazów do wyświetlenia w trybie batch
+    min_confidence: 70  # minimalna pewność predykcji dla obrazów w trybie batch
+  navigation:
+    image_dir: "data/test"  # katalog z obrazami do nawigacji w trybie single

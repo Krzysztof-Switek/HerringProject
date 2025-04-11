@@ -35,6 +35,15 @@ class GradCAM:
         self.forward_handle = target_layer.register_forward_hook(forward_hook)
         self.backward_handle = target_layer.register_full_backward_hook(backward_hook)
 
+    def clear_hooks(self):
+        """Jawne usuwanie hooków"""
+        if hasattr(self, 'forward_handle'):
+            self.forward_handle.remove()
+        if hasattr(self, 'backward_handle'):
+            self.backward_handle.remove()
+        self.activations = None
+        self.gradients = None
+
     def _find_target_layer(self):
         """Znajdowanie warstwy docelowej na podstawie nazwy"""
         module = self.model
