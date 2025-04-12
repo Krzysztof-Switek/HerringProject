@@ -14,9 +14,7 @@ from typing import List, Tuple, Optional
 class Predictor:
     def __init__(self, config_path: str = None):
         """
-        Inicjalizacja predykatora z obsługą multipleksowych wizualizacji
-        Args:
-            config_path: Ścieżka do pliku konfiguracyjnego
+        Inicjalizacja predykatora z rozszerzoną diagnostyką
         """
         # 1. Ładowanie konfiguracji
         self.project_root = Path(__file__).parent.parent
@@ -25,24 +23,27 @@ class Predictor:
         # 2. Inicjalizacja urządzenia
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        # 3. Ładowanie modelu
+        # 3. Ładowanie modelu z diagnostyką
         self.model = self._load_model()
         self.model.eval()
+        print("\n[DEBUG] Model architecture:")
+        print(self.model)
 
         # 4. Przygotowanie transformacji
         self.transform = transforms.Compose([
             transforms.Resize(self.cfg['data']['image_size']),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406],
-                               [0.229, 0.224, 0.225])
+                                 [0.229, 0.224, 0.225])
         ])
 
-        # 5. Słownik metod wizualizacji
+        # 5. Słownik metod wizualizacji z weryfikacją
         self.visualization_methods = {
             'gradcam': GradCAM,
             'gradcam++': GradCAMPP,
             'guided_backprop': GuidedBackprop
         }
+        print("\n[DEBUG] Available visualization methods:", list(self.visualization_methods.keys()))
 
         # 6. Inicjalizacja zmiennych dla nawigacji
         self.current_image_index = 0
@@ -50,7 +51,7 @@ class Predictor:
         self._init_image_paths()
 
     def _load_config(self, config_path):
-        """Ładowanie konfiguracji z walidacją ścieżek"""
+        """Ładowanie konfiguracji z walidacją"""
         if config_path is None:
             config_path = self.project_root / "src" / "config" / "config.yaml"
 
@@ -59,38 +60,127 @@ class Predictor:
             raise FileNotFoundError(f"Config file not found at: {config_path}")
 
         cfg = OmegaConf.load(config_path)
+
+        # Walidacja ścieżek
         cfg.data.root_dir = str(self.project_root / cfg.data.root_dir)
         cfg.training.checkpoint_dir = str(self.project_root / cfg.training.checkpoint_dir)
         cfg.prediction.model_path = str(self.project_root / cfg.prediction.model_path)
         cfg.prediction.image_path = str(self.project_root / cfg.prediction.image_path)
         cfg.prediction.results_dir = str(self.project_root / cfg.prediction.results_dir)
 
-        # Domyślna konfiguracja wizualizacji jeśli nie istnieje
+        # Domyślna konfiguracja wizualizacji
         if 'visualization' not in cfg:
-            cfg.visualization = OmegaConf.create()
-
-        required_visualization_keys = ['methods', 'target_layer', 'colormap', 'alpha']
-        for key in required_visualization_keys:
-            if key not in cfg.visualization:
-                raise ValueError(f"Missing required key in visualization config: {key}")
+            cfg.visualization = OmegaConf.create({
+                'methods': ['gradcam', 'gradcam++', 'guided_backprop'],
+                'target_layer': 'base.layer4.2.conv3',
+                'colormap': 'jet',
+                'alpha': 0.5,
+                'matrix_cols': 3,
+                'save_individual': False
+            })
 
         return cfg
 
     def _load_model(self):
-        """Ładowanie modelu z checkpointu"""
+        """Ładowanie modelu z dodatkowymi sprawdzeniami"""
         model_path = Path(self.cfg.prediction.model_path)
         if not model_path.exists():
             raise FileNotFoundError(f"Model not found at: {model_path}")
 
         model = HerringModel(DictConfig(self.cfg)).to(self.device)
 
+        # Ładowanie wag
         checkpoint = torch.load(model_path, map_location=self.device)
         if 'model_state_dict' in checkpoint:
             model.load_state_dict(checkpoint['model_state_dict'])
         else:
             model.load_state_dict(checkpoint)
 
+        # Sprawdź moduły ReLU
+        relu_modules = [name for name, module in model.named_modules() if isinstance(module, torch.nn.ReLU)]
+        print(f"\n[DEBUG] Found {len(relu_modules)} ReLU modules in model")
+        if len(relu_modules) == 0:
+            print("[WARNING] No ReLU modules found in model - Guided Backprop may not work!")
+
         return model
+
+    def _visualize_matrix(self, image, input_tensor, pred_class, confidence,
+                          results_dir: Path, image_name: str):
+        """Rozszerzona wizualizacja z diagnostyką"""
+        original_img = np.array(image)
+        methods = self.cfg['visualization']['methods']
+
+        print(f"\n[DEBUG] Generating visualizations for {len(methods)} methods...")
+
+        # Konfiguracja wykresu
+        cols = self.cfg['visualization']['matrix_cols']
+        rows = (len(methods) + 1) // cols + 1
+        fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 5 * rows))
+        axes = axes.flatten()
+
+        # Oryginalny obraz
+        axes[0].imshow(original_img / 255.0)
+        axes[0].set_title("Original Image")
+        axes[0].axis('off')
+
+        # Generowanie wizualizacji
+        for i, method_name in enumerate(methods, 1):
+            try:
+                print(f"[PROCESSING] Method: {method_name}")
+
+                # Inicjalizacja z diagnostyką
+                if method_name == 'guided_backprop':
+                    print("[DEBUG] Initializing GuidedBackprop...")
+                    print(f"ReLU count before: {sum(1 for m in self.model.modules() if isinstance(m, torch.nn.ReLU))}")
+                    visualizer = self.visualization_methods[method_name](self.model)
+                    print(f"Registered hooks: {len(visualizer.handles)}")
+                else:
+                    target_layer = self.cfg['visualization']['target_layer']
+                    print(f"[DEBUG] Initializing {method_name} for layer: {target_layer}")
+                    visualizer = self.visualization_methods[method_name](self.model, target_layer)
+
+                # Generowanie heatmapy
+                heatmap = visualizer.generate(input_tensor, pred_class)
+                print(f"[DEBUG] {method_name} heatmap range: {heatmap.min():.3f} to {heatmap.max():.3f}")
+
+                # Wizualizacja
+                if method_name == 'guided_backprop':
+                    axes[i].imshow(heatmap, cmap='gray')
+                else:
+                    heatmap = cv2.resize(heatmap, (original_img.shape[1], original_img.shape[0]))
+                    axes[i].imshow(original_img / 255.0)
+                    axes[i].imshow(heatmap,
+                                   cmap=self.cfg['visualization']['colormap'],
+                                   alpha=self.cfg['visualization']['alpha'])
+
+                axes[i].set_title(f"{method_name.upper()}")
+                axes[i].axis('off')
+
+            except Exception as e:
+                print(f"\n[ERROR] Failed to process {method_name}:")
+                import traceback
+                traceback.print_exc()
+
+                axes[i].imshow(np.zeros_like(original_img))
+                axes[i].set_title(f"{method_name.upper()} (failed)")
+                axes[i].axis('off')
+                continue
+
+        # Ukryj puste osie
+        for j in range(len(methods) + 1, rows * cols):
+            axes[j].axis('off')
+
+        plt.suptitle(f"Predicted: {pred_class} | Confidence: {confidence:.1f}%", y=1.02)
+        plt.tight_layout()
+
+        # Zapis wyników
+        if self.cfg['prediction']['save_results']:
+            output_path = results_dir / f"matrix_{Path(image_name).stem}.png"
+            plt.savefig(output_path, bbox_inches='tight', dpi=300)
+            print(f"\n[SAVED] Results to: {output_path}")
+
+        if self.cfg['prediction']['show_visualization']:
+            plt.show()
 
     def _init_image_paths(self):
         """Inicjalizacja listy ścieżek do obrazów"""
@@ -436,5 +526,5 @@ if __name__ == "__main__":
         predictor.predict_with_visualization(mode=mode)
 
     except Exception as e:
-        print(f"\nError during prediction: {str(e)}")
+        print(f"\n[FATAL ERROR] During prediction: {str(e)}")
         raise
