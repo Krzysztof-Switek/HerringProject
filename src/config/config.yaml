@@ -28,11 +28,6 @@ training:
   device: "auto"
   checkpoint_dir: "../../checkpoints"           # miejsce zapisu modelu
 
-gradcam:
-  target_layer: "base.layer4.2.conv3"              # warstwa dla Grad-CAM
-  colormap: "jet"                               # mapa kolorów dla heatmapy
-  alpha: 0.5                                    # przezroczystość heatmapy
-
 prediction:
   model_path: "checkpoints/best_model_epoch_97_acc_89.11.pth"
   image_path: "data/test/Głębia_Gdańska_0013_otsu_OBRYS_1.jpg"
@@ -47,3 +42,13 @@ prediction_modes:
     min_confidence: 70  # minimalna pewność predykcji dla obrazów w trybie batch
   navigation:
     image_dir: "data/test"  # katalog z obrazami do nawigacji w trybie single
+
+
+visualization:
+  methods: ['gradcam', 'gradcam++', 'guided_backprop']
+  display_mode: 'matrix'
+  matrix_cols: 3
+  save_individual: False
+  target_layer: "base.layer4.2.conv3"  # Przeniesione z sekcji gradcam
+  colormap: "jet"                      # Przeniesione z sekcji gradcam
+  alpha: 0.5                           # Przeniesione z sekcji gradcam

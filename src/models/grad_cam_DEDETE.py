@@ -100,3 +100,5 @@ class GradCAM:
             self.forward_handle.remove()
         if hasattr(self, 'backward_handle'):
             self.backward_handle.remove()
+
+

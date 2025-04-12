@@ -1,22 +1,20 @@
 import cv2
 import torch
-import yaml
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 from PIL import Image
 from torchvision import transforms
 from models.model import HerringModel
-from models.grad_cam import GradCAM
+from src.models.model_heatmaps import GradCAM, GradCAMPP, GuidedBackprop
 from omegaconf import DictConfig, OmegaConf
-import os
 from typing import List, Tuple, Optional
 
 
 class Predictor:
     def __init__(self, config_path: str = None):
         """
-        Inicjalizacja predykatora z obsługą Grad-CAM
+        Inicjalizacja predykatora z obsługą multipleksowych wizualizacji
         Args:
             config_path: Ścieżka do pliku konfiguracyjnego
         """
@@ -36,10 +34,17 @@ class Predictor:
             transforms.Resize(self.cfg['data']['image_size']),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406],
-                                 [0.229, 0.224, 0.225])
+                               [0.229, 0.224, 0.225])
         ])
 
-        # 5. Inicjalizacja zmiennych dla nawigacji
+        # 5. Słownik metod wizualizacji
+        self.visualization_methods = {
+            'gradcam': GradCAM,
+            'gradcam++': GradCAMPP,
+            'guided_backprop': GuidedBackprop
+        }
+
+        # 6. Inicjalizacja zmiennych dla nawigacji
         self.current_image_index = 0
         self.image_paths = []
         self._init_image_paths()
@@ -59,6 +64,15 @@ class Predictor:
         cfg.prediction.model_path = str(self.project_root / cfg.prediction.model_path)
         cfg.prediction.image_path = str(self.project_root / cfg.prediction.image_path)
         cfg.prediction.results_dir = str(self.project_root / cfg.prediction.results_dir)
+
+        # Domyślna konfiguracja wizualizacji jeśli nie istnieje
+        if 'visualization' not in cfg:
+            cfg.visualization = OmegaConf.create()
+
+        required_visualization_keys = ['methods', 'target_layer', 'colormap', 'alpha']
+        for key in required_visualization_keys:
+            if key not in cfg.visualization:
+                raise ValueError(f"Missing required key in visualization config: {key}")
 
         return cfg
 
@@ -104,12 +118,12 @@ class Predictor:
 
         extensions = ['.jpg', '.jpeg', '.png', '.bmp']
         image_paths = sorted([str(p.resolve()) for p in dir_path.glob('*')
-                              if p.suffix.lower() in extensions])
+                            if p.suffix.lower() in extensions])
         return image_paths
 
-    def predict_with_gradcam(self, image_path: str = None, mode: str = None):
+    def predict_with_visualization(self, image_path: str = None, mode: str = None):
         """
-        Wykonanie predykcji z wizualizacją Grad-CAM
+        Wykonanie predykcji z wieloma metodami wizualizacji
         Args:
             image_path: Opcjonalna ścieżka do obrazu (domyślnie z configa)
             mode: Tryb pracy ('single' lub 'batch')
@@ -124,7 +138,7 @@ class Predictor:
             self._single_mode(image_path)
 
     def _single_mode(self, image_path: str):
-        """Tryb pojedynczego obrazu z nawigacją"""
+        """Tryb pojedynczego obrazu z wieloma wizualizacjami"""
         # 1. Przygotowanie ścieżek
         image_path = Path(image_path)
         if not image_path.exists():
@@ -147,18 +161,89 @@ class Predictor:
         print(f"- Predicted class: {pred_class}")
         print(f"- Confidence: {probabilities[pred_class]:.1f}%")
 
-        # 4. Generowanie Grad-CAM
-        grad_cam = GradCAM(self.model, self.cfg['gradcam']['target_layer'])
-        heatmap = grad_cam.generate(input_tensor, pred_class)
-        grad_cam.clear_hooks()
+        # 4. Wizualizacja i zapis wyników
+        self._visualize_matrix(
+            image=image,
+            input_tensor=input_tensor,
+            pred_class=pred_class,
+            confidence=probabilities[pred_class],
+            results_dir=results_dir,
+            image_name=image_path.name
+        )
 
-        # 5. Wizualizacja i zapis wyników
-        self._visualize_single(image, heatmap, pred_class, probabilities[pred_class],
-                               results_dir, image_path.name)
-
-        # 6. Nawigacja jeśli jest więcej obrazów
+        # 5. Nawigacja jeśli jest więcej obrazów
         if len(self.image_paths) > 1:
             self._handle_navigation()
+
+    def _visualize_matrix(self, image, input_tensor, pred_class, confidence,
+                          results_dir: Path, image_name: str):
+        """Wizualizacja wielu metod w formie macierzy"""
+        original_img = np.array(image)
+        methods = self.cfg['visualization']['methods']
+
+        # Konfiguracja wykresu
+        cols = self.cfg['visualization']['matrix_cols']
+        rows = (len(methods) + 1) // cols + 1  # +1 dla oryginału
+        fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 5 * rows))
+        axes = axes.flatten()
+
+        # Oryginalny obraz
+        axes[0].imshow(original_img / 255.0)
+        axes[0].set_title("Original Image")
+        axes[0].axis('off')
+
+        # Generowanie wizualizacji
+        for i, method_name in enumerate(methods, 1):
+            try:
+                # Inicjalizacja wizualizatora
+                if method_name == 'guided_backprop':
+                    visualizer = self.visualization_methods[method_name](self.model)
+                else:
+                    visualizer = self.visualization_methods[method_name](
+                        self.model,
+                        self.cfg['visualization']['target_layer']  # Użyj nowej ścieżki
+                    )
+
+                heatmap = visualizer.generate(input_tensor, pred_class)
+
+                # Wizualizacja
+                if method_name == 'guided_backprop':
+                    axes[i].imshow(heatmap, cmap='gray')
+                else:
+                    heatmap = cv2.resize(heatmap, (original_img.shape[1], original_img.shape[0]))
+                    axes[i].imshow(original_img / 255.0)
+                    axes[i].imshow(heatmap,
+                                   cmap=self.cfg['visualization']['colormap'],
+                                   alpha=self.cfg['visualization']['alpha'])
+
+                axes[i].set_title(f"{method_name.upper()}")
+                axes[i].axis('off')
+
+            except Exception as e:
+                print(f"\nDetailed error with {method_name}:")
+                import traceback
+                traceback.print_exc()
+
+                axes[i].imshow(np.zeros_like(original_img))
+                axes[i].set_title(f"{method_name.upper()} (failed)")
+                axes[i].axis('off')
+                continue
+
+        # Ukryj puste osie
+        for j in range(len(methods) + 1, rows * cols):
+            axes[j].axis('off')
+
+        plt.suptitle(f"Predicted: {pred_class} | Confidence: {confidence:.1f}%", y=1.02)
+        plt.tight_layout()
+
+        # Zapis wyników
+        if self.cfg['prediction']['save_results']:
+            output_path = results_dir / f"matrix_{Path(image_name).stem}.png"
+            plt.savefig(output_path, bbox_inches='tight', dpi=300)
+            print(f"Results saved to: {output_path}")
+
+        if self.cfg['prediction']['show_visualization']:
+            plt.show()
 
     def _batch_mode(self):
         """Tryb wsadowy z wieloma obrazami spełniającymi warunek pewności"""
@@ -340,7 +425,7 @@ class Predictor:
 
 if __name__ == "__main__":
     try:
-        print("==== Herring Otolith Grad-CAM Visualization ====")
+        print("==== Herring Otolith Visualization Matrix ====")
         predictor = Predictor()
 
         # Wybór trybu pracy
@@ -348,7 +433,7 @@ if __name__ == "__main__":
         if mode not in ['single', 'batch']:
             mode = 'single'
 
-        predictor.predict_with_gradcam(mode=mode)
+        predictor.predict_with_visualization(mode=mode)
 
     except Exception as e:
         print(f"\nError during prediction: {str(e)}")
