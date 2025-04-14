@@ -36,12 +36,12 @@ prediction:
   save_results: true                            # czy wyświetlać wykresy matplotlib
 
 prediction_modes:
-  mode: "single"  # "single" lub "batch"
+  mode: "single"                                # "single" lub "batch"
   batch:
-    num_images: 4  # liczba obrazów do wyświetlenia w trybie batch
-    min_confidence: 70  # minimalna pewność predykcji dla obrazów w trybie batch
+    num_images: 4                               # liczba obrazów do wyświetlenia w trybie batch
+    min_confidence: 70                          # minimalna pewność predykcji dla obrazów w trybie batch
   navigation:
-    image_dir: "data/test"  # katalog z obrazami do nawigacji w trybie single
+    image_dir: "data/test"                      # katalog z obrazami do nawigacji w trybie single
 
 
 visualization:
@@ -49,6 +49,6 @@ visualization:
   display_mode: 'matrix'
   matrix_cols: 3
   save_individual: False
-  target_layer: "base.layer4.2.conv3"  # Przeniesione z sekcji gradcam
-  colormap: "jet"                      # Przeniesione z sekcji gradcam
-  alpha: 0.5                           # Przeniesione z sekcji gradcam
+  target_layer: "base.layer4.2.conv3"
+  colormap: "jet"
+  alpha: 0.5

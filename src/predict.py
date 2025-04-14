@@ -13,23 +13,14 @@ from typing import List, Tuple, Optional
 
 class Predictor:
     def __init__(self, config_path: str = None):
-        """
-        Inicjalizacja predykatora z rozszerzoną diagnostyką
-        """
-        # 1. Ładowanie konfiguracji
+        """Inicjalizacja predykatora z rozszerzoną diagnostyką"""
         self.project_root = Path(__file__).parent.parent
         self.cfg = self._load_config(config_path)
-
-        # 2. Inicjalizacja urządzenia
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        # 3. Ładowanie modelu z diagnostyką
         self.model = self._load_model()
         self.model.eval()
-        print("\n[DEBUG] Model architecture:")
-        print(self.model)
 
-        # 4. Przygotowanie transformacji
+        # Przygotowanie transformacji
         self.transform = transforms.Compose([
             transforms.Resize(self.cfg['data']['image_size']),
             transforms.ToTensor(),
@@ -37,15 +28,14 @@ class Predictor:
                                  [0.229, 0.224, 0.225])
         ])
 
-        # 5. Słownik metod wizualizacji z weryfikacją
+        # Słownik metod wizualizacji
         self.visualization_methods = {
             'gradcam': GradCAM,
             'gradcam++': GradCAMPP,
             'guided_backprop': GuidedBackprop
         }
-        print("\n[DEBUG] Available visualization methods:", list(self.visualization_methods.keys()))
 
-        # 6. Inicjalizacja zmiennych dla nawigacji
+        # Inicjalizacja zmiennych dla nawigacji
         self.current_image_index = 0
         self.image_paths = []
         self._init_image_paths()
@@ -96,91 +86,7 @@ class Predictor:
         else:
             model.load_state_dict(checkpoint)
 
-        # Sprawdź moduły ReLU
-        relu_modules = [name for name, module in model.named_modules() if isinstance(module, torch.nn.ReLU)]
-        print(f"\n[DEBUG] Found {len(relu_modules)} ReLU modules in model")
-        if len(relu_modules) == 0:
-            print("[WARNING] No ReLU modules found in model - Guided Backprop may not work!")
-
         return model
-
-    def _visualize_matrix(self, image, input_tensor, pred_class, confidence,
-                          results_dir: Path, image_name: str):
-        """Rozszerzona wizualizacja z diagnostyką"""
-        original_img = np.array(image)
-        methods = self.cfg['visualization']['methods']
-
-        print(f"\n[DEBUG] Generating visualizations for {len(methods)} methods...")
-
-        # Konfiguracja wykresu
-        cols = self.cfg['visualization']['matrix_cols']
-        rows = (len(methods) + 1) // cols + 1
-        fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 5 * rows))
-        axes = axes.flatten()
-
-        # Oryginalny obraz
-        axes[0].imshow(original_img / 255.0)
-        axes[0].set_title("Original Image")
-        axes[0].axis('off')
-
-        # Generowanie wizualizacji
-        for i, method_name in enumerate(methods, 1):
-            try:
-                print(f"[PROCESSING] Method: {method_name}")
-
-                # Inicjalizacja z diagnostyką
-                if method_name == 'guided_backprop':
-                    print("[DEBUG] Initializing GuidedBackprop...")
-                    print(f"ReLU count before: {sum(1 for m in self.model.modules() if isinstance(m, torch.nn.ReLU))}")
-                    visualizer = self.visualization_methods[method_name](self.model)
-                    print(f"Registered hooks: {len(visualizer.handles)}")
-                else:
-                    target_layer = self.cfg['visualization']['target_layer']
-                    print(f"[DEBUG] Initializing {method_name} for layer: {target_layer}")
-                    visualizer = self.visualization_methods[method_name](self.model, target_layer)
-
-                # Generowanie heatmapy
-                heatmap = visualizer.generate(input_tensor, pred_class)
-                print(f"[DEBUG] {method_name} heatmap range: {heatmap.min():.3f} to {heatmap.max():.3f}")
-
-                # Wizualizacja
-                if method_name == 'guided_backprop':
-                    axes[i].imshow(heatmap, cmap='gray')
-                else:
-                    heatmap = cv2.resize(heatmap, (original_img.shape[1], original_img.shape[0]))
-                    axes[i].imshow(original_img / 255.0)
-                    axes[i].imshow(heatmap,
-                                   cmap=self.cfg['visualization']['colormap'],
-                                   alpha=self.cfg['visualization']['alpha'])
-
-                axes[i].set_title(f"{method_name.upper()}")
-                axes[i].axis('off')
-
-            except Exception as e:
-                print(f"\n[ERROR] Failed to process {method_name}:")
-                import traceback
-                traceback.print_exc()
-
-                axes[i].imshow(np.zeros_like(original_img))
-                axes[i].set_title(f"{method_name.upper()} (failed)")
-                axes[i].axis('off')
-                continue
-
-        # Ukryj puste osie
-        for j in range(len(methods) + 1, rows * cols):
-            axes[j].axis('off')
-
-        plt.suptitle(f"Predicted: {pred_class} | Confidence: {confidence:.1f}%", y=1.02)
-        plt.tight_layout()
-
-        # Zapis wyników
-        if self.cfg['prediction']['save_results']:
-            output_path = results_dir / f"matrix_{Path(image_name).stem}.png"
-            plt.savefig(output_path, bbox_inches='tight', dpi=300)
-            print(f"\n[SAVED] Results to: {output_path}")
-
-        if self.cfg['prediction']['show_visualization']:
-            plt.show()
 
     def _init_image_paths(self):
         """Inicjalizacja listy ścieżek do obrazów"""
@@ -208,7 +114,7 @@ class Predictor:
 
         extensions = ['.jpg', '.jpeg', '.png', '.bmp']
         image_paths = sorted([str(p.resolve()) for p in dir_path.glob('*')
-                            if p.suffix.lower() in extensions])
+                              if p.suffix.lower() in extensions])
         return image_paths
 
     def predict_with_visualization(self, image_path: str = None, mode: str = None):
@@ -229,7 +135,6 @@ class Predictor:
 
     def _single_mode(self, image_path: str):
         """Tryb pojedynczego obrazu z wieloma wizualizacjami"""
-        # 1. Przygotowanie ścieżek
         image_path = Path(image_path)
         if not image_path.exists():
             raise FileNotFoundError(f"Image not found at: {image_path}")
@@ -237,21 +142,21 @@ class Predictor:
         results_dir = Path(self.cfg['prediction']['results_dir'])
         results_dir.mkdir(parents=True, exist_ok=True)
 
-        # 2. Wczytanie i transformacja obrazu
+        # Wczytanie i transformacja obrazu
         image = Image.open(image_path).convert('RGB')
         input_tensor = self.transform(image).unsqueeze(0).to(self.device)
 
-        # 3. Predykcja klasy
+        # Predykcja klasy
         with torch.no_grad():
             output = self.model(input_tensor)
             probabilities = torch.nn.functional.softmax(output, dim=1)[0] * 100
             pred_class = output.argmax().item()
 
-        print(f"\nPrediction results for {image_path.name}:")
-        print(f"- Predicted class: {pred_class}")
+        print(f"\n[PREDICTION] {image_path.name}:")
+        print(f"- Class: {pred_class}")
         print(f"- Confidence: {probabilities[pred_class]:.1f}%")
 
-        # 4. Wizualizacja i zapis wyników
+        # Wizualizacja
         self._visualize_matrix(
             image=image,
             input_tensor=input_tensor,
@@ -261,7 +166,7 @@ class Predictor:
             image_name=image_path.name
         )
 
-        # 5. Nawigacja jeśli jest więcej obrazów
+        # Nawigacja jeśli jest więcej obrazów
         if len(self.image_paths) > 1:
             self._handle_navigation()
 
@@ -273,7 +178,7 @@ class Predictor:
 
         # Konfiguracja wykresu
         cols = self.cfg['visualization']['matrix_cols']
-        rows = (len(methods) + 1) // cols + 1  # +1 dla oryginału
+        rows = (len(methods) + 1) // cols + 1
         fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 5 * rows))
         axes = axes.flatten()
 
@@ -285,16 +190,24 @@ class Predictor:
         # Generowanie wizualizacji
         for i, method_name in enumerate(methods, 1):
             try:
-                # Inicjalizacja wizualizatora
+                print(f"\n[VISUALIZATION] Processing {method_name}...")
+
+                # Inicjalizacja z diagnostyką
                 if method_name == 'guided_backprop':
                     visualizer = self.visualization_methods[method_name](self.model)
+                    print(f"[HOOK STATUS] {visualizer.get_hook_status()}")
                 else:
+                    target_layer = self.cfg['visualization']['target_layer']
                     visualizer = self.visualization_methods[method_name](
-                        self.model,
-                        self.cfg['visualization']['target_layer']  # Użyj nowej ścieżki
-                    )
+                        self.model, target_layer)
+                    print(f"[HOOK STATUS] {visualizer.get_hook_status()}")
 
+                if not visualizer.verify_hooks():
+                    raise RuntimeError(f"Hooks verification failed for {method_name}")
+
+                # Generowanie heatmapy
                 heatmap = visualizer.generate(input_tensor, pred_class)
+                print(f"[HEATMAP] Range: {heatmap.min():.3f} to {heatmap.max():.3f}")
 
                 # Wizualizacja
                 if method_name == 'guided_backprop':
@@ -310,9 +223,8 @@ class Predictor:
                 axes[i].axis('off')
 
             except Exception as e:
-                print(f"\nDetailed error with {method_name}:")
-                import traceback
-                traceback.print_exc()
+                print(f"\n[ERROR] {method_name} failed:")
+                print(f"Error: {str(e)}")
 
                 axes[i].imshow(np.zeros_like(original_img))
                 axes[i].set_title(f"{method_name.upper()} (failed)")
@@ -330,7 +242,7 @@ class Predictor:
         if self.cfg['prediction']['save_results']:
             output_path = results_dir / f"matrix_{Path(image_name).stem}.png"
             plt.savefig(output_path, bbox_inches='tight', dpi=300)
-            print(f"Results saved to: {output_path}")
+            print(f"\n[SAVED] Results to: {output_path}")
 
         if self.cfg['prediction']['show_visualization']:
             plt.show()
@@ -340,14 +252,12 @@ class Predictor:
         min_confidence = self.cfg['prediction_modes']['batch']['min_confidence']
         num_images = self.cfg['prediction_modes']['batch']['num_images']
 
-        print(f"\nStarting batch mode processing (min confidence: {min_confidence}%)...")
+        print(f"\n[BATCH MODE] Processing (min confidence: {min_confidence}%)...")
 
-        # 1. Przygotowanie wyników
         results = []
         processed = 0
 
-        # 2. Przetwarzanie obrazów (ograniczone do pierwszych 500 dla wydajności)
-        for img_path in self.image_paths[:500]:
+        for img_path in self.image_paths[:500]:  # Ogranicz do 500 obrazów
             try:
                 pred_class, confidence = self._get_prediction_info(img_path)
                 if confidence >= min_confidence:
@@ -355,16 +265,16 @@ class Predictor:
 
                 processed += 1
                 if processed % 50 == 0:
-                    print(f"Processed {processed} images, found {len(results)} with confidence >= {min_confidence}%")
+                    print(f"Processed {processed} images, found {len(results)} matches")
 
-                if len(results) >= num_images * 2:  # Zbieramy 2x więcej niż potrzebujemy dla lepszej selekcji
+                if len(results) >= num_images * 2:
                     break
 
             except Exception as e:
                 print(f"Error processing {Path(img_path).name}: {str(e)}")
                 continue
 
-        # 3. Sortowanie i wybór najlepszych obrazów
+        # Sortowanie i wybór najlepszych
         results.sort(key=lambda x: x[2], reverse=True)
         selected_results = results[:num_images]
 
@@ -376,11 +286,11 @@ class Predictor:
         for img_path, pred_class, confidence in selected_results:
             print(f"- {Path(img_path).name}: class {pred_class}, confidence {confidence:.1f}%")
 
-        # 4. Generowanie wizualizacji
+        # Generowanie wizualizacji
         self._visualize_batch(selected_results)
 
     def _get_prediction_info(self, image_path: str) -> Tuple[int, float]:
-        """Pobiera informacje o predykcji dla obrazu (bez Grad-CAM)"""
+        """Pobiera informacje o predykcji dla obrazu"""
         image = Image.open(image_path).convert('RGB')
         input_tensor = self.transform(image).unsqueeze(0).to(self.device)
 
@@ -391,51 +301,6 @@ class Predictor:
 
         return pred_class, float(probabilities[pred_class])
 
-    def _visualize_single(self, image, heatmap, pred_class, confidence,
-                          results_dir: Path, image_name: str):
-        """Wizualizacja pojedynczego obrazu z Grad-CAM"""
-        # 1. Przygotowanie danych
-        original_img = np.array(image)
-        heatmap = cv2.resize(heatmap, (original_img.shape[1], original_img.shape[0]))
-
-        # 2. Tworzenie heatmapy
-        colormap = plt.get_cmap(self.cfg['gradcam']['colormap'])
-        heatmap = (heatmap * 255).astype(np.uint8)
-        heatmap = colormap(heatmap)[:, :, :3] * 255
-
-        # 3. Nałożenie heatmapy na oryginalny obraz
-        superimposed_img = (original_img * (1 - self.cfg['gradcam']['alpha']) +
-                            heatmap * self.cfg['gradcam']['alpha'])
-        superimposed_img = np.clip(superimposed_img, 0, 255).astype(np.float32) / 255.0
-
-        # 4. Wyświetlenie
-        if self.cfg['prediction']['show_visualization']:
-            plt.figure(figsize=(15, 5))
-
-            plt.subplot(1, 3, 1)
-            plt.imshow(original_img / 255.0)
-            plt.title("Original Image")
-            plt.axis('off')
-
-            plt.subplot(1, 3, 2)
-            plt.imshow(heatmap / 255.0)
-            plt.title("Grad-CAM Heatmap")
-            plt.axis('off')
-
-            plt.subplot(1, 3, 3)
-            plt.imshow(superimposed_img)
-            plt.title(f"Predicted: {pred_class}\nConfidence: {confidence:.1f}%")
-            plt.axis('off')
-
-            plt.tight_layout()
-            plt.show()
-
-        # 5. Zapis wyników
-        if self.cfg['prediction']['save_results']:
-            output_path = results_dir / f"gradcam_{Path(image_name).stem}.png"
-            plt.imsave(output_path, superimposed_img)
-            print(f"Results saved to: {output_path}")
-
     def _visualize_batch(self, images_info: List[Tuple[str, int, float]]):
         """Wizualizacja wsadowa wielu obrazów"""
         plt.figure(figsize=(15, 10))
@@ -445,26 +310,27 @@ class Predictor:
 
         for i, (img_path, pred_class, confidence) in enumerate(images_info, 1):
             try:
-                # 1. Wczytanie i przetworzenie obrazu
+                # Wczytanie i przetworzenie obrazu
                 image = Image.open(img_path).convert('RGB')
                 input_tensor = self.transform(image).unsqueeze(0).to(self.device)
 
-                # 2. Generowanie Grad-CAM
-                grad_cam = GradCAM(self.model, self.cfg['gradcam']['target_layer'])
+                # Generowanie Grad-CAM
+                grad_cam = GradCAM(self.model, self.cfg['visualization']['target_layer'])
+                print(f"\n[HOOK STATUS] {grad_cam.get_hook_status()}")
                 heatmap = grad_cam.generate(input_tensor, pred_class)
                 grad_cam.clear_hooks()
 
-                # 3. Przygotowanie wizualizacji
+                # Przygotowanie wizualizacji
                 original_img = np.array(image)
                 heatmap = cv2.resize(heatmap, (original_img.shape[1], original_img.shape[0]))
-                colormap = plt.get_cmap(self.cfg['gradcam']['colormap'])
+                colormap = plt.get_cmap(self.cfg['visualization']['colormap'])
                 heatmap = (heatmap * 255).astype(np.uint8)
                 heatmap = colormap(heatmap)[:, :, :3] * 255
-                superimposed_img = (original_img * (1 - self.cfg['gradcam']['alpha']) +
-                                    heatmap * self.cfg['gradcam']['alpha'])
+                superimposed_img = (original_img * (1 - self.cfg['visualization']['alpha']) +
+                                    heatmap * self.cfg['visualization']['alpha'])
                 superimposed_img = np.clip(superimposed_img, 0, 255).astype(np.float32) / 255.0
 
-                # 4. Dodanie do wykresu
+                # Dodanie do wykresu
                 plt.subplot(rows, cols, i)
                 plt.imshow(superimposed_img)
                 plt.title(f"{Path(img_path).name}\nClass: {pred_class} ({confidence:.1f}%)")
@@ -483,14 +349,14 @@ class Predictor:
 
             output_path = results_dir / "batch_gradcam_results.png"
             plt.savefig(output_path, bbox_inches='tight', dpi=300)
-            print(f"\nBatch results saved to: {output_path}")
+            print(f"\n[SAVED] Batch results to: {output_path}")
 
         if self.cfg['prediction']['show_visualization']:
             plt.show()
 
     def _handle_navigation(self):
         """Obsługa nawigacji między obrazami w trybie single"""
-        print("\nNavigation options:")
+        print("\n[NAVIGATION] Options:")
         print("- [N] Next image")
         print("- [P] Previous image")
         print("- [Q] Quit")
@@ -526,5 +392,5 @@ if __name__ == "__main__":
         predictor.predict_with_visualization(mode=mode)
 
     except Exception as e:
-        print(f"\n[FATAL ERROR] During prediction: {str(e)}")
+        print(f"\n[FATAL ERROR] {str(e)}")
         raise

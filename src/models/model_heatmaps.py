@@ -20,6 +20,10 @@ class BaseHeatmapGenerator(ABC):
     def verify_hooks(self) -> bool:
         pass
 
+    @abstractmethod
+    def get_hook_status(self) -> str:
+        pass
+
 
 class GradCAM(BaseHeatmapGenerator):
     """Implementacja metody Grad-CAM."""
@@ -29,6 +33,8 @@ class GradCAM(BaseHeatmapGenerator):
         self.target_layer = target_layer
         self.activations = None
         self.gradients = None
+        self.forward_handle = None
+        self.backward_handle = None
         self._register_hooks()
 
     def _find_target_layer(self) -> torch.nn.Module:
@@ -43,7 +49,7 @@ class GradCAM(BaseHeatmapGenerator):
                     module = getattr(module, part)
             return module
         except (AttributeError, IndexError) as e:
-            raise ValueError(f"Błąd wyszukiwania warstwy: {str(e)}")
+            raise ValueError(f"Layer search error: {str(e)}")
 
     def _register_hooks(self):
         target_module = self._find_target_layer()
@@ -55,28 +61,37 @@ class GradCAM(BaseHeatmapGenerator):
             self.gradients = grad_output[0].detach()
             return None
 
+        self.clear_hooks()  # Usuń istniejące hooki
         self.forward_handle = target_module.register_forward_hook(forward_hook)
         self.backward_handle = target_module.register_full_backward_hook(backward_hook)
 
     def verify_hooks(self) -> bool:
-        return (self.forward_handle is not None and
-                self.backward_handle is not None)
+        return (self.forward_handle is not None and self.backward_handle is not None)
+
+    def get_hook_status(self) -> str:
+        status = f"GradCAM | Layer: {self.target_layer} | "
+        status += f"Forward: {'active' if self.forward_handle else 'inactive'}, "
+        status += f"Backward: {'active' if self.backward_handle else 'inactive'}"
+        return status
 
     def clear_hooks(self):
-        for handle in [self.forward_handle, self.backward_handle]:
-            if handle:
-                handle.remove()
+        if self.forward_handle:
+            self.forward_handle.remove()
+            self.forward_handle = None
+        if self.backward_handle:
+            self.backward_handle.remove()
+            self.backward_handle = None
         self.activations = None
         self.gradients = None
 
     def generate(self, input_tensor: torch.Tensor, class_idx: int) -> np.ndarray:
         if not self.verify_hooks():
-            raise RuntimeError("Hooki nie są aktywne")
+            raise RuntimeError("Hooks are not active")
 
         output = self.model(input_tensor)
 
         if class_idx >= output.shape[1]:
-            raise ValueError(f"Nieprawidłowy indeks klasy: {class_idx}")
+            raise ValueError(f"Invalid class index: {class_idx}")
 
         self.model.zero_grad()
         one_hot = torch.zeros_like(output)
@@ -99,12 +114,12 @@ class GradCAMPP(GradCAM):
 
     def generate(self, input_tensor: torch.Tensor, class_idx: int) -> np.ndarray:
         if not self.verify_hooks():
-            raise RuntimeError("Hooki nie są aktywne")
+            raise RuntimeError("Hooks are not active")
 
         output = self.model(input_tensor)
 
         if class_idx >= output.shape[1]:
-            raise ValueError(f"Nieprawidłowy indeks klasy: {class_idx}")
+            raise ValueError(f"Invalid class index: {class_idx}")
 
         self.model.zero_grad()
         one_hot = torch.zeros_like(output)
@@ -123,21 +138,16 @@ class GradCAMPP(GradCAM):
 
 
 class GuidedBackprop(BaseHeatmapGenerator):
-    """Poprawiona implementacja Guided Backpropagation."""
+    """Implementacja Guided Backpropagation."""
 
     def __init__(self, model: torch.nn.Module):
-        self.model = model.eval()  # Tryb ewaluacji
+        self.model = model.eval()
         self.handles = []
-
-        # 1. Wyłącz inplace w ReLU
         self._disable_inplace_relu()
-
-        # 2. Zarejestruj hooki
         self._register_hooks()
 
-        # 3. Weryfikacja
         if not self.verify_hooks():
-            raise RuntimeError("Nie wszystkie hooki zostały zarejestrowane")
+            raise RuntimeError("Failed to register all hooks")
 
     def _disable_inplace_relu(self):
         """Wyłącza inplace w modułach ReLU."""
@@ -148,18 +158,16 @@ class GuidedBackprop(BaseHeatmapGenerator):
     def _register_hooks(self):
         """Rejestruje hooki dla ReLU."""
 
-        def relu_hook(module, grad_input, grad_output):
-            # Klonuj i modyfikuj gradienty
+        def relu_backward_hook(module, grad_input, grad_output):
             grad = grad_input[0].clone()
             grad[grad < 0] = 0
             return (grad,)
 
         self.clear_hooks()
 
-        # Zarejestruj hooki dla wszystkich ReLU
         for module in self.model.modules():
             if isinstance(module, torch.nn.ReLU):
-                handle = module.register_full_backward_hook(relu_hook)
+                handle = module.register_full_backward_hook(relu_backward_hook)
                 self.handles.append(handle)
 
     def verify_hooks(self) -> bool:
@@ -167,22 +175,24 @@ class GuidedBackprop(BaseHeatmapGenerator):
         relu_count = sum(1 for m in self.model.modules() if isinstance(m, torch.nn.ReLU))
         return len(self.handles) == relu_count
 
+    def get_hook_status(self) -> str:
+        relu_count = sum(1 for m in self.model.modules() if isinstance(m, torch.nn.ReLU))
+        return f"GuidedBackprop | ReLU hooks: {len(self.handles)}/{relu_count}"
+
     def clear_hooks(self):
-        """Usuwa wszystkie zarejestrowane hooki."""
         for handle in self.handles:
             handle.remove()
         self.handles = []
 
     def generate(self, input_tensor: torch.Tensor, class_idx: int) -> np.ndarray:
-        """Generuje mapę saliency z rozszerzoną diagnostyką."""
         if not self.verify_hooks():
-            raise RuntimeError("Nie wszystkie hooki są aktywne")
+            raise RuntimeError("Not all hooks are active")
 
         input_tensor = input_tensor.clone().requires_grad_(True)
         output = self.model(input_tensor)
 
         if class_idx >= output.shape[1]:
-            raise ValueError(f"Nieprawidłowy indeks klasy: {class_idx}")
+            raise ValueError(f"Invalid class index: {class_idx}")
 
         self.model.zero_grad()
         one_hot = torch.zeros_like(output)
@@ -190,7 +200,7 @@ class GuidedBackprop(BaseHeatmapGenerator):
         output.backward(gradient=one_hot)
 
         if input_tensor.grad is None:
-            raise RuntimeError("Brak gradientów - hooki nie zadziałały")
+            raise RuntimeError("No gradients - hooks failed")
 
         saliency = input_tensor.grad[0].cpu().numpy()
         saliency = np.max(np.abs(saliency), axis=0)
