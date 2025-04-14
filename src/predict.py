@@ -13,14 +13,12 @@ from typing import List, Tuple, Optional
 
 class Predictor:
     def __init__(self, config_path: str = None):
-        """Inicjalizacja predykatora z rozszerzoną diagnostyką"""
         self.project_root = Path(__file__).parent.parent
         self.cfg = self._load_config(config_path)
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = self._load_model()
         self.model.eval()
 
-        # Przygotowanie transformacji
         self.transform = transforms.Compose([
             transforms.Resize(self.cfg['data']['image_size']),
             transforms.ToTensor(),
@@ -28,20 +26,17 @@ class Predictor:
                                  [0.229, 0.224, 0.225])
         ])
 
-        # Słownik metod wizualizacji
         self.visualization_methods = {
             'gradcam': GradCAM,
             'gradcam++': GradCAMPP,
             'guided_backprop': GuidedBackprop
         }
 
-        # Inicjalizacja zmiennych dla nawigacji
         self.current_image_index = 0
         self.image_paths = []
         self._init_image_paths()
 
     def _load_config(self, config_path):
-        """Ładowanie konfiguracji z walidacją"""
         if config_path is None:
             config_path = self.project_root / "src" / "config" / "config.yaml"
 
@@ -51,14 +46,12 @@ class Predictor:
 
         cfg = OmegaConf.load(config_path)
 
-        # Walidacja ścieżek
         cfg.data.root_dir = str(self.project_root / cfg.data.root_dir)
         cfg.training.checkpoint_dir = str(self.project_root / cfg.training.checkpoint_dir)
         cfg.prediction.model_path = str(self.project_root / cfg.prediction.model_path)
         cfg.prediction.image_path = str(self.project_root / cfg.prediction.image_path)
         cfg.prediction.results_dir = str(self.project_root / cfg.prediction.results_dir)
 
-        # Domyślna konfiguracja wizualizacji
         if 'visualization' not in cfg:
             cfg.visualization = OmegaConf.create({
                 'methods': ['gradcam', 'gradcam++', 'guided_backprop'],
@@ -72,15 +65,13 @@ class Predictor:
         return cfg
 
     def _load_model(self):
-        """Ładowanie modelu z dodatkowymi sprawdzeniami"""
         model_path = Path(self.cfg.prediction.model_path)
         if not model_path.exists():
             raise FileNotFoundError(f"Model not found at: {model_path}")
 
         model = HerringModel(DictConfig(self.cfg)).to(self.device)
-
-        # Ładowanie wag
         checkpoint = torch.load(model_path, map_location=self.device)
+
         if 'model_state_dict' in checkpoint:
             model.load_state_dict(checkpoint['model_state_dict'])
         else:
@@ -89,14 +80,12 @@ class Predictor:
         return model
 
     def _init_image_paths(self):
-        """Inicjalizacja listy ścieżek do obrazów"""
         image_dir = self.cfg['prediction_modes']['navigation']['image_dir']
         if not Path(image_dir).is_absolute():
             image_dir = self.project_root / image_dir
 
         self.image_paths = self._get_image_paths_from_dir(image_dir)
 
-        # Ustaw aktualny indeks na podstawie domyślnego obrazu z configa
         default_image = Path(self.cfg.prediction.image_path)
         if not default_image.is_absolute():
             default_image = self.project_root / default_image
@@ -107,25 +96,16 @@ class Predictor:
             self.current_image_index = 0
 
     def _get_image_paths_from_dir(self, dir_path: str) -> List[str]:
-        """Pobiera posortowaną listę ścieżek do obrazów w katalogu"""
         dir_path = Path(dir_path)
         if not dir_path.exists():
             raise FileNotFoundError(f"Directory not found: {dir_path}")
 
         extensions = ['.jpg', '.jpeg', '.png', '.bmp']
-        image_paths = sorted([str(p.resolve()) for p in dir_path.glob('*')
-                              if p.suffix.lower() in extensions])
-        return image_paths
+        return sorted([str(p.resolve()) for p in dir_path.glob('*')
+                       if p.suffix.lower() in extensions])
 
     def predict_with_visualization(self, image_path: str = None, mode: str = None):
-        """
-        Wykonanie predykcji z wieloma metodami wizualizacji
-        Args:
-            image_path: Opcjonalna ścieżka do obrazu (domyślnie z configa)
-            mode: Tryb pracy ('single' lub 'batch')
-        """
         mode = mode or self.cfg['prediction_modes']['mode']
-
         if mode == "batch":
             self._batch_mode()
         else:
@@ -134,7 +114,6 @@ class Predictor:
             self._single_mode(image_path)
 
     def _single_mode(self, image_path: str):
-        """Tryb pojedynczego obrazu z wieloma wizualizacjami"""
         image_path = Path(image_path)
         if not image_path.exists():
             raise FileNotFoundError(f"Image not found at: {image_path}")
@@ -142,11 +121,9 @@ class Predictor:
         results_dir = Path(self.cfg['prediction']['results_dir'])
         results_dir.mkdir(parents=True, exist_ok=True)
 
-        # Wczytanie i transformacja obrazu
         image = Image.open(image_path).convert('RGB')
         input_tensor = self.transform(image).unsqueeze(0).to(self.device)
 
-        # Predykcja klasy
         with torch.no_grad():
             output = self.model(input_tensor)
             probabilities = torch.nn.functional.softmax(output, dim=1)[0] * 100
@@ -156,7 +133,6 @@ class Predictor:
         print(f"- Class: {pred_class}")
         print(f"- Confidence: {probabilities[pred_class]:.1f}%")
 
-        # Wizualizacja
         self._visualize_matrix(
             image=image,
             input_tensor=input_tensor,
@@ -166,50 +142,50 @@ class Predictor:
             image_name=image_path.name
         )
 
-        # Nawigacja jeśli jest więcej obrazów
         if len(self.image_paths) > 1:
             self._handle_navigation()
 
     def _visualize_matrix(self, image, input_tensor, pred_class, confidence,
                           results_dir: Path, image_name: str):
-        """Wizualizacja wielu metod w formie macierzy"""
         original_img = np.array(image)
         methods = self.cfg['visualization']['methods']
+        model_name = self.cfg['model']['base_model']
 
-        # Konfiguracja wykresu
-        cols = self.cfg['visualization']['matrix_cols']
-        rows = (len(methods) + 1) // cols + 1
-        fig, axes = plt.subplots(rows, cols, figsize=(5 * cols, 5 * rows))
+        cols = len(methods) + 1
+        fig, axes = plt.subplots(1, cols, figsize=(5 * cols, 5))
+        mng = plt.get_current_fig_manager()
+        try:
+            mng.window.state('zoomed')  # dla Windows (TkAgg)
+        except Exception:
+            try:
+                mng.window.showMaximized()  # dla Linux/Qt
+            except Exception:
+                pass  # ignoruj jeśli backend nie wspiera
+
         axes = axes.flatten()
 
-        # Oryginalny obraz
         axes[0].imshow(original_img / 255.0)
-        axes[0].set_title("Original Image")
+        axes[0].set_title("Original Image", fontsize=14)
         axes[0].axis('off')
 
-        # Generowanie wizualizacji
         for i, method_name in enumerate(methods, 1):
             try:
                 print(f"\n[VISUALIZATION] Processing {method_name}...")
 
-                # Inicjalizacja z diagnostyką
                 if method_name == 'guided_backprop':
                     visualizer = self.visualization_methods[method_name](self.model)
                     print(f"[HOOK STATUS] {visualizer.get_hook_status()}")
                 else:
                     target_layer = self.cfg['visualization']['target_layer']
-                    visualizer = self.visualization_methods[method_name](
-                        self.model, target_layer)
+                    visualizer = self.visualization_methods[method_name](self.model, target_layer)
                     print(f"[HOOK STATUS] {visualizer.get_hook_status()}")
 
                 if not visualizer.verify_hooks():
                     raise RuntimeError(f"Hooks verification failed for {method_name}")
 
-                # Generowanie heatmapy
                 heatmap = visualizer.generate(input_tensor, pred_class)
                 print(f"[HEATMAP] Range: {heatmap.min():.3f} to {heatmap.max():.3f}")
 
-                # Wizualizacja
                 if method_name == 'guided_backprop':
                     axes[i].imshow(heatmap, cmap='gray')
                 else:
@@ -219,28 +195,24 @@ class Predictor:
                                    cmap=self.cfg['visualization']['colormap'],
                                    alpha=self.cfg['visualization']['alpha'])
 
-                axes[i].set_title(f"{method_name.upper()}")
+                axes[i].set_title(method_name.upper(), fontsize=14)
                 axes[i].axis('off')
 
             except Exception as e:
-                print(f"\n[ERROR] {method_name} failed:")
-                print(f"Error: {str(e)}")
-
+                print(f"\n[ERROR] {method_name} failed: {str(e)}")
                 axes[i].imshow(np.zeros_like(original_img))
-                axes[i].set_title(f"{method_name.upper()} (failed)")
+                axes[i].set_title(f"{method_name.upper()} (failed)", fontsize=14)
                 axes[i].axis('off')
                 continue
 
-        # Ukryj puste osie
-        for j in range(len(methods) + 1, rows * cols):
-            axes[j].axis('off')
+        # Tytuł zbiorczy - większy i bardziej czytelny
+        title = f"MODEL: {model_name.upper()} | PREDICTED CLASS: {pred_class} | CONFIDENCE: {confidence:.1f}%"
+        fig.suptitle(title, fontsize=18, fontweight='bold', y=0.98)
 
-        plt.suptitle(f"Predicted: {pred_class} | Confidence: {confidence:.1f}%", y=1.02)
-        plt.tight_layout()
+        plt.subplots_adjust(top=0.9)
 
-        # Zapis wyników
         if self.cfg['prediction']['save_results']:
-            output_path = results_dir / f"matrix_{Path(image_name).stem}.png"
+            output_path = results_dir / f"{model_name}_{Path(image_name).stem}.png"
             plt.savefig(output_path, bbox_inches='tight', dpi=300)
             print(f"\n[SAVED] Results to: {output_path}")
 
@@ -248,7 +220,6 @@ class Predictor:
             plt.show()
 
     def _batch_mode(self):
-        """Tryb wsadowy z wieloma obrazami spełniającymi warunek pewności"""
         min_confidence = self.cfg['prediction_modes']['batch']['min_confidence']
         num_images = self.cfg['prediction_modes']['batch']['num_images']
 
@@ -257,7 +228,7 @@ class Predictor:
         results = []
         processed = 0
 
-        for img_path in self.image_paths[:500]:  # Ogranicz do 500 obrazów
+        for img_path in self.image_paths[:500]:
             try:
                 pred_class, confidence = self._get_prediction_info(img_path)
                 if confidence >= min_confidence:
@@ -274,7 +245,6 @@ class Predictor:
                 print(f"Error processing {Path(img_path).name}: {str(e)}")
                 continue
 
-        # Sortowanie i wybór najlepszych
         results.sort(key=lambda x: x[2], reverse=True)
         selected_results = results[:num_images]
 
@@ -286,11 +256,9 @@ class Predictor:
         for img_path, pred_class, confidence in selected_results:
             print(f"- {Path(img_path).name}: class {pred_class}, confidence {confidence:.1f}%")
 
-        # Generowanie wizualizacji
         self._visualize_batch(selected_results)
 
     def _get_prediction_info(self, image_path: str) -> Tuple[int, float]:
-        """Pobiera informacje o predykcji dla obrazu"""
         image = Image.open(image_path).convert('RGB')
         input_tensor = self.transform(image).unsqueeze(0).to(self.device)
 
@@ -302,25 +270,30 @@ class Predictor:
         return pred_class, float(probabilities[pred_class])
 
     def _visualize_batch(self, images_info: List[Tuple[str, int, float]]):
-        """Wizualizacja wsadowa wielu obrazów"""
         plt.figure(figsize=(15, 10))
+        mng = plt.get_current_fig_manager()
+        try:
+            mng.window.state('zoomed')
+        except Exception:
+            try:
+                mng.window.showMaximized()
+            except Exception:
+                pass
+
         num_images = len(images_info)
         cols = min(4, num_images)
         rows = (num_images + cols - 1) // cols
 
         for i, (img_path, pred_class, confidence) in enumerate(images_info, 1):
             try:
-                # Wczytanie i przetworzenie obrazu
                 image = Image.open(img_path).convert('RGB')
                 input_tensor = self.transform(image).unsqueeze(0).to(self.device)
 
-                # Generowanie Grad-CAM
                 grad_cam = GradCAM(self.model, self.cfg['visualization']['target_layer'])
                 print(f"\n[HOOK STATUS] {grad_cam.get_hook_status()}")
                 heatmap = grad_cam.generate(input_tensor, pred_class)
                 grad_cam.clear_hooks()
 
-                # Przygotowanie wizualizacji
                 original_img = np.array(image)
                 heatmap = cv2.resize(heatmap, (original_img.shape[1], original_img.shape[0]))
                 colormap = plt.get_cmap(self.cfg['visualization']['colormap'])
@@ -330,7 +303,6 @@ class Predictor:
                                     heatmap * self.cfg['visualization']['alpha'])
                 superimposed_img = np.clip(superimposed_img, 0, 255).astype(np.float32) / 255.0
 
-                # Dodanie do wykresu
                 plt.subplot(rows, cols, i)
                 plt.imshow(superimposed_img)
                 plt.title(f"{Path(img_path).name}\nClass: {pred_class} ({confidence:.1f}%)")
@@ -342,12 +314,11 @@ class Predictor:
 
         plt.tight_layout()
 
-        # Zapis wyników
         if self.cfg['prediction']['save_results']:
             results_dir = Path(self.cfg['prediction']['results_dir'])
             results_dir.mkdir(parents=True, exist_ok=True)
 
-            output_path = results_dir / "batch_gradcam_results.png"
+            output_path = results_dir / "results-change.png"
             plt.savefig(output_path, bbox_inches='tight', dpi=300)
             print(f"\n[SAVED] Batch results to: {output_path}")
 
@@ -355,7 +326,6 @@ class Predictor:
             plt.show()
 
     def _handle_navigation(self):
-        """Obsługa nawigacji między obrazami w trybie single"""
         print("\n[NAVIGATION] Options:")
         print("- [N] Next image")
         print("- [P] Previous image")
@@ -363,7 +333,6 @@ class Predictor:
 
         while True:
             key = input("Enter your choice (N/P/Q): ").strip().upper()
-
             if key == 'Q':
                 break
             elif key == 'N':
@@ -384,7 +353,6 @@ if __name__ == "__main__":
         print("==== Herring Otolith Visualization Matrix ====")
         predictor = Predictor()
 
-        # Wybór trybu pracy
         mode = input("Choose mode [single/batch] (default: single): ").strip().lower()
         if mode not in ['single', 'batch']:
             mode = 'single'
