@@ -164,8 +164,9 @@ class Predictor:
 
         axes = axes.flatten()
 
+        # Pierwszy obrazek - oryginalny
         axes[0].imshow(original_img / 255.0)
-        axes[0].set_title("Original Image", fontsize=14)
+        axes[0].set_title(Path(image_name).stem, fontsize=14, pad=10, y=-0.1)  # y ujemne przesuwa podpis pod obrazek
         axes[0].axis('off')
 
         for i, method_name in enumerate(methods, 1):
@@ -195,21 +196,22 @@ class Predictor:
                                    cmap=self.cfg['visualization']['colormap'],
                                    alpha=self.cfg['visualization']['alpha'])
 
-                axes[i].set_title(method_name.upper(), fontsize=14)
+                axes[i].set_title(method_name.upper(), fontsize=14, pad=10,
+                                  y=-0.1)  # y ujemne przesuwa podpis pod obrazek
                 axes[i].axis('off')
 
             except Exception as e:
                 print(f"\n[ERROR] {method_name} failed: {str(e)}")
                 axes[i].imshow(np.zeros_like(original_img))
-                axes[i].set_title(f"{method_name.upper()} (failed)", fontsize=14)
+                axes[i].set_title(f"{method_name.upper()} (failed)", fontsize=14, pad=10, y=-0.1)
                 axes[i].axis('off')
                 continue
 
-        # Tytuł zbiorczy - większy i bardziej czytelny
+        # Tytuł zbiorczy
         title = f"MODEL: {model_name.upper()} | PREDICTED CLASS: {pred_class} | CONFIDENCE: {confidence:.1f}%"
-        fig.suptitle(title, fontsize=18, fontweight='bold', y=0.98)
+        fig.suptitle(title, fontsize=18, fontweight='bold', y=1.0)  # Zwiększony parametr y
 
-        plt.subplots_adjust(top=0.9)
+        plt.subplots_adjust(top=0.85, bottom=0.05)  # Dostosowane marginesy
 
         if self.cfg['prediction']['save_results']:
             output_path = results_dir / f"{model_name}_{Path(image_name).stem}.png"
@@ -305,14 +307,16 @@ class Predictor:
 
                 plt.subplot(rows, cols, i)
                 plt.imshow(superimposed_img)
-                plt.title(f"{Path(img_path).name}\nClass: {pred_class} ({confidence:.1f}%)")
+                plt.title(f"{Path(img_path).name}\nClass: {pred_class} ({confidence:.1f}%)",
+                          fontsize=10, pad=10, y=-0.2)  # y ujemne przesuwa podpis pod obrazek
                 plt.axis('off')
 
             except Exception as e:
                 print(f"Error visualizing {Path(img_path).name}: {str(e)}")
                 continue
 
-        plt.tight_layout()
+        plt.tight_layout(h_pad=2.0)  # Zwiększony odstęp pionowy
+        plt.subplots_adjust(top=0.9, bottom=0.1)  # Dostosowane marginesy
 
         if self.cfg['prediction']['save_results']:
             results_dir = Path(self.cfg['prediction']['results_dir'])
