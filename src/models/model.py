@@ -15,10 +15,18 @@ class HerringModel(nn.Module):
 
     def _init_base_model(self) -> nn.Module:
         """Initialize base model with automatic device placement"""
-        # Validate model name
-        available_models = [m for m in dir(models) if m.islower() and not m.startswith('__')]
-        if self.cfg.base_model not in available_models:
-            raise ValueError(f"Model {self.cfg.base_model} not available. Choose from: {available_models}")
+        # Model-specific configurations
+        model_config = {
+            "resnet50": {"image_size": 224, "classifier": "fc"},
+            "convnext_large": {"image_size": 384, "classifier": "classifier"},
+            "vit_h_14": {"image_size": 384, "classifier": "heads"},
+            "efficientnet_v2_l": {"image_size": 480, "classifier": "classifier"},
+            "regnety_032": {"image_size": 384, "classifier": "head.fc"},
+        }
+
+        if self.cfg.base_model not in model_config:
+            available_models = list(model_config.keys())
+            raise ValueError(f"Model {self.cfg.base_model} not configured. Choose from: {available_models}")
 
         # Handle weights
         weights = None
@@ -34,34 +42,36 @@ class HerringModel(nn.Module):
 
         # Freeze layers if needed
         if self.cfg.freeze_encoder:
-            for name, param in model.named_parameters():
-                if 'fc' not in name and 'classifier' not in name:
-                    param.requires_grad = False
+            for param in model.parameters():
+                param.requires_grad = False
 
-        # Replace final layer — modyfikacja z Dropout
-        dropout_p = getattr(self.cfg, "dropout_rate", 0.0)  # <--- Wartość z config.yaml, domyślnie 0.0
+        # Model-specific classifier replacement
+        dropout_p = getattr(self.cfg, "dropout_rate", 0.0)
+        classifier_path = model_config[self.cfg.base_model]["classifier"].split('.')
 
-        if hasattr(model, 'fc'):
-            num_features = model.fc.in_features
-            model.fc = nn.Sequential(
+        # Navigate to the classifier layer
+        parent_module = model
+        for part in classifier_path[:-1]:
+            parent_module = getattr(parent_module, part)
+
+        last_part = classifier_path[-1]
+        original_classifier = getattr(parent_module, last_part)
+
+        if isinstance(original_classifier, nn.Sequential):
+            # For sequential classifiers (like in ConvNeXt)
+            num_features = original_classifier[-1].in_features
+            new_classifier = nn.Sequential(
                 nn.Dropout(p=dropout_p),
                 nn.Linear(num_features, self.cfg.num_classes)
             )
-        elif hasattr(model, 'classifier'):
-            if isinstance(model.classifier, nn.Sequential):
-                num_features = model.classifier[-1].in_features
-                model.classifier[-1] = nn.Sequential(
-                    nn.Dropout(p=dropout_p),
-                    nn.Linear(num_features, self.cfg.num_classes)
-                )
-            else:
-                num_features = model.classifier.in_features
-                model.classifier = nn.Sequential(
-                    nn.Dropout(p=dropout_p),
-                    nn.Linear(num_features, self.cfg.num_classes)
-                )
+            original_classifier[-1] = new_classifier
         else:
-            raise AttributeError("Model has no recognizable classifier layer")
+            # For simple linear classifiers
+            num_features = original_classifier.in_features
+            setattr(parent_module, last_part, nn.Sequential(
+                nn.Dropout(p=dropout_p),
+                nn.Linear(num_features, self.cfg.num_classes)
+            ))
 
         return model
 
@@ -77,7 +87,7 @@ class HerringModel(nn.Module):
         print(f"Trainable parameters: {trainable_params:,}")
         print(f"Pretrained weights: {self.cfg.pretrained}")
         print(f"Frozen encoder: {self.cfg.freeze_encoder}")
-        print(f"Dropout rate: {getattr(self.cfg, 'dropout_rate', 0.0)}")  # <--- Podgląd wartości dropout
+        print(f"Dropout rate: {getattr(self.cfg, 'dropout_rate', 0.0)}")
         print("=" * 50 + "\n")
 
     def forward(self, x):
