@@ -151,41 +151,37 @@ class Predictor:
         methods = self.cfg['visualization']['methods']
         model_name = self.cfg['model']['base_model']
 
+        # Calculate figure size based on number of methods
         cols = len(methods) + 1
-        fig, axes = plt.subplots(1, cols, figsize=(5 * cols, 5))
+        fig_width = 5 * cols
+        fig, axes = plt.subplots(1, cols, figsize=(fig_width, 5))
+
+        # Window management
         mng = plt.get_current_fig_manager()
         try:
-            mng.window.state('zoomed')  # dla Windows (TkAgg)
-        except Exception:
+            mng.window.state('zoomed')
+        except:
             try:
-                mng.window.showMaximized()  # dla Linux/Qt
-            except Exception:
-                pass  # ignoruj jeśli backend nie wspiera
+                mng.window.showMaximized()
+            except:
+                pass
 
         axes = axes.flatten()
 
-        # Pierwszy obrazek - oryginalny
+        # Original image
         axes[0].imshow(original_img / 255.0)
-        axes[0].set_title(Path(image_name).stem, fontsize=14, pad=10, y=-0.1)  # y ujemne przesuwa podpis pod obrazek
+        axes[0].set_title("Analyzed picture", fontsize=12, pad=10, y=-0.15)
         axes[0].axis('off')
 
+        # Visualization methods
         for i, method_name in enumerate(methods, 1):
             try:
-                print(f"\n[VISUALIZATION] Processing {method_name}...")
-
-                if method_name == 'guided_backprop':
-                    visualizer = self.visualization_methods[method_name](self.model)
-                    print(f"[HOOK STATUS] {visualizer.get_hook_status()}")
-                else:
-                    target_layer = self.cfg['visualization']['target_layer']
-                    visualizer = self.visualization_methods[method_name](self.model, target_layer)
-                    print(f"[HOOK STATUS] {visualizer.get_hook_status()}")
-
-                if not visualizer.verify_hooks():
-                    raise RuntimeError(f"Hooks verification failed for {method_name}")
+                visualizer = (self.visualization_methods[method_name](self.model)
+                              if method_name == 'guided_backprop'
+                              else self.visualization_methods[method_name](
+                    self.model, self.cfg['visualization']['target_layer']))
 
                 heatmap = visualizer.generate(input_tensor, pred_class)
-                print(f"[HEATMAP] Range: {heatmap.min():.3f} to {heatmap.max():.3f}")
 
                 if method_name == 'guided_backprop':
                     axes[i].imshow(heatmap, cmap='gray')
@@ -196,23 +192,49 @@ class Predictor:
                                    cmap=self.cfg['visualization']['colormap'],
                                    alpha=self.cfg['visualization']['alpha'])
 
-                axes[i].set_title(method_name.upper(), fontsize=14, pad=10,
-                                  y=-0.1)  # y ujemne przesuwa podpis pod obrazek
+                axes[i].set_title(method_name.upper(), fontsize=12, pad=10, y=-0.15)
                 axes[i].axis('off')
 
             except Exception as e:
-                print(f"\n[ERROR] {method_name} failed: {str(e)}")
                 axes[i].imshow(np.zeros_like(original_img))
-                axes[i].set_title(f"{method_name.upper()} (failed)", fontsize=14, pad=10, y=-0.1)
+                axes[i].set_title(f"{method_name.upper()} (failed)", fontsize=12, pad=10, y=-0.15)
                 axes[i].axis('off')
                 continue
 
-        # Tytuł zbiorczy
-        title = f"MODEL: {model_name.upper()} | PREDICTED CLASS: {pred_class} | CONFIDENCE: {confidence:.1f}%"
-        fig.suptitle(title, fontsize=18, fontweight='bold', y=1.0)  # Zwiększony parametr y
+        # Main title and subtitle
+        main_title = f"Model: {model_name.upper()} | Predicted class: {pred_class} | Accuracy: {confidence:.1f}%"
+        filename = f"File name: {Path(image_name).name}"
 
-        plt.subplots_adjust(top=0.85, bottom=0.05)  # Dostosowane marginesy
+        # Adjust layout parameters - manual layout instead of tight_layout
+        plt.subplots_adjust(
+            top=0.85,  # Top margin
+            bottom=0.05,  # Bottom margin
+            left=0.05 / cols,  # Dynamic left margin
+            right=1 - 0.05 / cols,  # Dynamic right margin
+            wspace=0.3 + 0.1 * cols  # Dynamic spacing based on column count
+        )
 
+        # Main title
+        fig.suptitle(
+            main_title,
+            fontsize=14,
+            fontweight='bold',
+            y=0.95,  # Slightly higher position
+            x=0.5,
+            ha='center'
+        )
+
+        # Subtitle
+        plt.text(
+            0.5, 0.90,
+            filename,
+            fontsize=12,
+            ha='center',
+            va='center',
+            transform=fig.transFigure
+        )
+
+        # Save and show
         if self.cfg['prediction']['save_results']:
             output_path = results_dir / f"{model_name}_{Path(image_name).stem}.png"
             plt.savefig(output_path, bbox_inches='tight', dpi=300)
