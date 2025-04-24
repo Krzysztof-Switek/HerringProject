@@ -174,7 +174,8 @@ class Trainer:
         checkpoint_dir = self.project_root / "checkpoints"
         checkpoint_dir.mkdir(exist_ok=True)
 
-        checkpoint_path = checkpoint_dir / f"best_model_epoch_{epoch}_acc_{val_acc:.2f}.pth"
+        model_name = self.cfg.model.base_model.replace('/', '_')
+        checkpoint_path = checkpoint_dir / f"{model_name}_epoch_{epoch}_acc_{val_acc:.2f}.pth"
 
         torch.save({
             'epoch': epoch,
