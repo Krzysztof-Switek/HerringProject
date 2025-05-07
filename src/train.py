@@ -1,4 +1,3 @@
-import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -7,6 +6,7 @@ from omegaconf import OmegaConf
 from torch.utils.tensorboard import SummaryWriter
 from data_loader.dataset import HerringDataset
 from models.model import HerringModel
+from sklearn.metrics import precision_score, recall_score, f1_score
 
 
 class Trainer:
@@ -54,7 +54,6 @@ class Trainer:
         if torch.cuda.is_available():
             try:
                 device = torch.device("cuda")
-                # Testowe wykonanie operacji na GPU
                 _ = torch.tensor([1.0]).to(device)
                 return device
             except Exception as e:
@@ -66,11 +65,9 @@ class Trainer:
         """Pełna weryfikacja struktury katalogów danych"""
         print("\nValidating data structure...")
 
-        # Ścieżki do katalogów
         train_dir = self.project_root / "data" / "train"
         val_dir = self.project_root / "data" / "val"
 
-        # Sprawdzenie istnienia głównych katalogów
         required_dirs = {
             "train": train_dir,
             "val": val_dir
@@ -90,7 +87,6 @@ class Trainer:
                     f"    └── 2/"
                 )
 
-            # Sprawdzenie podkatalogów klas
             class_dirs = [d for d in dir_path.iterdir() if d.is_dir()]
             if not class_dirs:
                 raise FileNotFoundError(
@@ -126,7 +122,6 @@ class Trainer:
             loss.backward()
             optimizer.step()
 
-            # Aktualizacja statystyk
             stats['loss'] += loss.item()
             _, predicted = outputs.max(1)
             stats['total'] += targets.size(0)
@@ -138,9 +133,17 @@ class Trainer:
         epoch_loss = stats['loss'] / len(train_loader)
         epoch_acc = 100. * stats['correct'] / stats['total']
 
+        # Oblicz inne metryki
+        precision = precision_score(targets.cpu(), predicted.cpu(), average='binary')
+        recall = recall_score(targets.cpu(), predicted.cpu(), average='binary')
+        f1 = f1_score(targets.cpu(), predicted.cpu(), average='binary')
+
         if self.writer:
             self.writer.add_scalar("Loss/train", epoch_loss, epoch)
             self.writer.add_scalar("Accuracy/train", epoch_acc, epoch)
+            self.writer.add_scalar("Precision/train", precision, epoch)
+            self.writer.add_scalar("Recall/train", recall, epoch)
+            self.writer.add_scalar("F1/train", f1, epoch)
 
         return epoch_loss, epoch_acc
 
@@ -163,9 +166,17 @@ class Trainer:
         val_loss = stats['loss'] / len(val_loader)
         val_acc = 100. * stats['correct'] / stats['total']
 
+        # Oblicz inne metryki
+        precision = precision_score(targets.cpu(), predicted.cpu(), average='binary')
+        recall = recall_score(targets.cpu(), predicted.cpu(), average='binary')
+        f1 = f1_score(targets.cpu(), predicted.cpu(), average='binary')
+
         if self.writer:
             self.writer.add_scalar("Loss/val", val_loss, epoch)
             self.writer.add_scalar("Accuracy/val", val_acc, epoch)
+            self.writer.add_scalar("Precision/val", precision, epoch)
+            self.writer.add_scalar("Recall/val", recall, epoch)
+            self.writer.add_scalar("F1/val", f1, epoch)
 
         return val_loss, val_acc
 
@@ -191,9 +202,6 @@ class Trainer:
     def train(self):
         """Główna pętla treningowa"""
 
-        last_conv_layer = self._get_last_conv_layer_name()
-        print(f"\nLast convolutional layer: {last_conv_layer}")
-
         train_loader, val_loader, class_names = self.data_loader.get_loaders()
 
         # Konfiguracja treningu
@@ -208,67 +216,25 @@ class Trainer:
             T_max=self.cfg.training.epochs
         )
 
-        print("\nStarting training with configuration:")
-        print(f"- Base model:         {self.cfg.model.base_model}")
-        print(f"- Pretrained:         {self.cfg.model.pretrained}")
-        print(f"- Freeze encoder:     {self.cfg.model.freeze_encoder}")
-        print(f"- Dropout rate:       {getattr(self.cfg.model, 'dropout_rate', 0.0)}")
-        print(f"- Num classes:        {self.cfg.model.num_classes}")
-        print(f"- Epochs:             {self.cfg.training.epochs}")
-        print(f"- Batch size:         {self.cfg.data.batch_size}")
-        print(f"- Learning rate:      {self.cfg.training.learning_rate}")
-        print(f"- Training samples:   {len(train_loader.dataset)}")
-        print(f"- Validation samples: {len(val_loader.dataset)}")
-        print(f"- Class labels:       {class_names}\n")
-
         best_acc = 0.0
         for epoch in range(self.cfg.training.epochs):
             train_loss, train_acc = self._train_epoch(train_loader, optimizer, criterion, epoch)
             val_loss, val_acc = self._validate(val_loader, criterion, epoch)
             scheduler.step()
 
-            print(f"Epoch {epoch + 1}/{self.cfg.training.epochs} || "
-                  f"Train Loss: {train_loss:.4f} | Acc: {train_acc:.2f}% || "
-                  f"Val Loss: {val_loss:.4f} | Acc: {val_acc:.2f}%")
-
             if val_acc > best_acc:
                 best_acc = val_acc
-                checkpoint_path = self._save_checkpoint(
-                    epoch + 1, optimizer, val_acc, class_names
-                )
+                checkpoint_path = self._save_checkpoint(epoch + 1, optimizer, val_acc, class_names)
                 print(f"Saved best model to: {checkpoint_path}")
 
         if self.writer:
             self.writer.close()
 
-    def _get_last_conv_layer_name(self):
-        """Funkcja do znalezienia nazwy ostatniej warstwy konwolucyjnej"""
-        last_conv_layer = None
-        for name, module in self.model.named_modules():
-            if isinstance(module, nn.Conv2d):
-                last_conv_layer = name  # Zapamiętaj nazwę ostatniej warstwy konwolucyjnej
-        return last_conv_layer
-
 
 if __name__ == "__main__":
-    print("==== Herring Otolith Classification Training ====")
     try:
         trainer = Trainer()
-
-        print("\nData statistics:")
-        trainer.data_loader.show_stats()
-
-        print("\nStarting training...")
         trainer.train()
-
     except Exception as e:
-        print(f"\nError during training initialization: {str(e)}")
-        print("\nPlease verify your directory structure:")
-        print("1. Ensure all required directories exist:")
-        print("   - data/train/1/")
-        print("   - data/train/2/")
-        print("   - data/val/1/")
-        print("   - data/val/2/")
-        print("2. Each class directory should contain image files")
-        print("3. Check config.yaml paths are correct")
+        print(f"Error during training initialization: {str(e)}")
         raise

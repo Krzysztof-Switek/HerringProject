@@ -19,6 +19,9 @@ class Predictor:
         self.model = self._load_model()
         self.model.eval()
 
+        # Dodanie logu dla ostatniej warstwy konwolucyjnej
+        self.print_last_conv_layer(self.model)
+
         self.transform = transforms.Compose([
             transforms.Resize(self.cfg['data']['image_size']),
             transforms.ToTensor(),
@@ -55,7 +58,7 @@ class Predictor:
         if 'visualization' not in cfg:
             cfg.visualization = OmegaConf.create({
                 'methods': ['gradcam', 'gradcam++', 'guided_backprop'],
-                'target_layer': 'base.layer4.2.conv3',
+                'target_layer': 'features.6.conv',
                 'colormap': 'jet',
                 'alpha': 0.5,
                 'matrix_cols': 3,
@@ -156,16 +159,6 @@ class Predictor:
         fig_width = 5 * cols
         fig, axes = plt.subplots(1, cols, figsize=(fig_width, 5))
 
-        # Window management
-        mng = plt.get_current_fig_manager()
-        try:
-            mng.window.state('zoomed')
-        except:
-            try:
-                mng.window.showMaximized()
-            except:
-                pass
-
         axes = axes.flatten()
 
         # Original image
@@ -205,13 +198,13 @@ class Predictor:
         main_title = f"Model: {model_name.upper()} | Predicted class: {pred_class} | Accuracy: {confidence:.1f}%"
         filename = f"File name: {Path(image_name).name}"
 
-        # Adjust layout parameters - manual layout instead of tight_layout
+        # Adjust layout parameters
         plt.subplots_adjust(
-            top=0.85,  # Top margin
-            bottom=0.05,  # Bottom margin
-            left=0.05 / cols,  # Dynamic left margin
-            right=1 - 0.05 / cols,  # Dynamic right margin
-            wspace=0.3 + 0.1 * cols  # Dynamic spacing based on column count
+            top=0.85,
+            bottom=0.05,
+            left=0.05 / cols,
+            right=1 - 0.05 / cols,
+            wspace=0.3 + 0.1 * cols
         )
 
         # Main title
@@ -219,7 +212,7 @@ class Predictor:
             main_title,
             fontsize=14,
             fontweight='bold',
-            y=0.95,  # Slightly higher position
+            y=0.95,
             x=0.5,
             ha='center'
         )
@@ -242,6 +235,16 @@ class Predictor:
 
         if self.cfg['prediction']['show_visualization']:
             plt.show()
+
+    def print_last_conv_layer(self, model):
+        last_conv_layer_name = None
+        for name, module in model.named_modules():
+            if isinstance(module, torch.nn.Conv2d):
+                last_conv_layer_name = name
+        if last_conv_layer_name:
+            print(f"Last convolutional layer: {last_conv_layer_name}")
+        else:
+            print("No convolutional layers found in the model.")
 
     def _batch_mode(self):
         min_confidence = self.cfg['prediction_modes']['batch']['min_confidence']
@@ -330,15 +333,15 @@ class Predictor:
                 plt.subplot(rows, cols, i)
                 plt.imshow(superimposed_img)
                 plt.title(f"{Path(img_path).name}\nClass: {pred_class} ({confidence:.1f}%)",
-                          fontsize=10, pad=10, y=-0.2)  # y ujemne przesuwa podpis pod obrazek
+                          fontsize=10, pad=10, y=-0.2)
                 plt.axis('off')
 
             except Exception as e:
                 print(f"Error visualizing {Path(img_path).name}: {str(e)}")
                 continue
 
-        plt.tight_layout(h_pad=2.0)  # Zwiększony odstęp pionowy
-        plt.subplots_adjust(top=0.9, bottom=0.1)  # Dostosowane marginesy
+        plt.tight_layout(h_pad=2.0)
+        plt.subplots_adjust(top=0.9, bottom=0.1)
 
         if self.cfg['prediction']['save_results']:
             results_dir = Path(self.cfg['prediction']['results_dir'])

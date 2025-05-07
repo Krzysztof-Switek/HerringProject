@@ -29,7 +29,7 @@ training:
   checkpoint_dir: "../../checkpoints"           # miejsce zapisu modelu
 
 prediction:
-  model_path: "checkpoints/best_model_epoch_97_acc_89.11.pth"
+  model_path: "checkpoints/efficientnet_acc_86/efficientnet_v2_l_epoch_23_acc_86.14.pth"
   image_path: "data/test/Głębia_Gdańska_0013_otsu_OBRYS_1.jpg"
   results_dir: "results/gradcam"
   show_visualization: true
@@ -49,6 +49,6 @@ visualization:
   display_mode: 'matrix'
   matrix_cols: 3
   save_individual: False
-  target_layer: "base.layer4.2.conv3"
+  target_layer: "base.features.8.0"           #resnet50:"base.layer4.2.conv3"; efficientnet:"base.features.8.0"
   colormap: "jet"
   alpha: 0.5
