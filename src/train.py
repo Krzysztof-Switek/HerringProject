@@ -208,7 +208,7 @@ class Trainer:
         optimizer = optim.AdamW(
             self.model.parameters(),
             lr=self.cfg.training.learning_rate,
-            weight_decay=1e-4
+            weight_decay=self.cfg.model.weight_decay  # Dodanie weight_decay z config.yaml
         )
         scheduler = optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
@@ -216,6 +216,7 @@ class Trainer:
         )
 
         best_acc = 0.0
+        patience_counter = 0  # Licznik epok bez poprawy
         for epoch in range(self.cfg.training.epochs):
             train_loss, train_acc = self._train_epoch(train_loader, optimizer, criterion, epoch)
             val_loss, val_acc = self._validate(val_loader, criterion, epoch)
@@ -223,8 +224,16 @@ class Trainer:
 
             if val_acc > best_acc:
                 best_acc = val_acc
+                patience_counter = 0  # Reset licznika po poprawie dokładności
                 checkpoint_path = self._save_checkpoint(epoch + 1, optimizer, val_acc, class_names)
                 print(f"Saved best model to: {checkpoint_path}")
+            else:
+                patience_counter += 1
+
+            # Jeśli accuracy na zbiorze walidacyjnym nie poprawia się przez 'patience' epok, zatrzymaj trening
+            if patience_counter >= 5:  # Możesz dostosować liczbę epok, np. 5
+                print(f"Early stopping triggered at epoch {epoch + 1}")
+                break
 
         if self.writer:
             self.writer.close()
