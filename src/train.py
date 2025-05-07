@@ -7,7 +7,9 @@ from torch.utils.tensorboard import SummaryWriter
 from data_loader.dataset import HerringDataset
 from models.model import HerringModel
 from sklearn.metrics import precision_score, recall_score, f1_score
-
+import csv
+import subprocess
+import os
 
 class Trainer:
     def __init__(self, config_path: str = None):
@@ -34,6 +36,11 @@ class Trainer:
         self.model = HerringModel(self.cfg).to(self.device)
         self.data_loader = HerringDataset(self.cfg)
         self.writer = self._init_tensorboard()
+
+        # Inicjalizacja pliku do zapisywania metryk
+        self.metrics_file = open("training_metrics.csv", mode="w", newline="")
+        self.metrics_writer = csv.writer(self.metrics_file)
+        self.metrics_writer.writerow(['Epoch', 'Train Loss', 'Train Accuracy', 'Train Precision', 'Train Recall', 'Train F1', 'Val Loss', 'Val Accuracy', 'Val Precision', 'Val Recall', 'Val F1'])
 
     def _load_config(self, config_path):
         """Ładowanie konfiguracji z automatyczną korektą ścieżek"""
@@ -127,9 +134,6 @@ class Trainer:
             stats['total'] += targets.size(0)
             stats['correct'] += predicted.eq(targets).sum().item()
 
-            if batch_idx % 10 == 0:
-                print(f"Epoch: {epoch} | Batch: {batch_idx}/{len(train_loader)} | Loss: {loss.item():.4f}")
-
         epoch_loss = stats['loss'] / len(train_loader)
         epoch_acc = 100. * stats['correct'] / stats['total']
 
@@ -138,12 +142,8 @@ class Trainer:
         recall = recall_score(targets.cpu(), predicted.cpu(), average='binary')
         f1 = f1_score(targets.cpu(), predicted.cpu(), average='binary')
 
-        if self.writer:
-            self.writer.add_scalar("Loss/train", epoch_loss, epoch)
-            self.writer.add_scalar("Accuracy/train", epoch_acc, epoch)
-            self.writer.add_scalar("Precision/train", precision, epoch)
-            self.writer.add_scalar("Recall/train", recall, epoch)
-            self.writer.add_scalar("F1/train", f1, epoch)
+        # Zapisz metryki
+        self._save_metrics(epoch, epoch_loss, epoch_acc, precision, recall, f1, 0, 0, 0, 0, 0)
 
         return epoch_loss, epoch_acc
 
@@ -171,14 +171,14 @@ class Trainer:
         recall = recall_score(targets.cpu(), predicted.cpu(), average='binary')
         f1 = f1_score(targets.cpu(), predicted.cpu(), average='binary')
 
-        if self.writer:
-            self.writer.add_scalar("Loss/val", val_loss, epoch)
-            self.writer.add_scalar("Accuracy/val", val_acc, epoch)
-            self.writer.add_scalar("Precision/val", precision, epoch)
-            self.writer.add_scalar("Recall/val", recall, epoch)
-            self.writer.add_scalar("F1/val", f1, epoch)
+        # Zapisz metryki walidacji
+        self._save_metrics(epoch, 0, 0, 0, 0, 0, val_loss, val_acc, precision, recall, f1)
 
         return val_loss, val_acc
+
+    def _save_metrics(self, epoch, train_loss, train_acc, train_precision, train_recall, train_f1, val_loss, val_acc, val_precision, val_recall, val_f1):
+        """Zapisanie metryk do pliku CSV"""
+        self.metrics_writer.writerow([epoch, train_loss, train_acc, train_precision, train_recall, train_f1, val_loss, val_acc, val_precision, val_recall, val_f1])
 
     def _save_checkpoint(self, epoch, optimizer, val_acc, class_names):
         """Zapis checkpointu modelu"""
@@ -201,7 +201,6 @@ class Trainer:
 
     def train(self):
         """Główna pętla treningowa"""
-
         train_loader, val_loader, class_names = self.data_loader.get_loaders()
 
         # Konfiguracja treningu
@@ -229,6 +228,13 @@ class Trainer:
 
         if self.writer:
             self.writer.close()
+
+        # Zamknięcie pliku z metrykami
+        self.metrics_file.close()
+
+        # Uruchomienie TensorBoard po zakończeniu treningu
+        log_dir = self.project_root / "results" / "logs"
+        subprocess.run(["tensorboard", "--logdir", str(log_dir)])
 
 
 if __name__ == "__main__":
