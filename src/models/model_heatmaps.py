@@ -209,23 +209,11 @@ class GuidedBackprop(BaseHeatmapGenerator):
         saliency = cv2.normalize(saliency, None, 0, 1, cv2.NORM_MINMAX)
         saliency = np.clip(saliency, 0, 1)  # Upewnienie się, że wartości są w zakresie [0, 1]
 
-        # Zastosowanie logarytmicznej normalizacji
+        # Zastosowanie logarytmicznej normalizacji (tylko dla kontrastu)
         saliency = np.log1p(saliency)  # Logarytmiczne uwydatnienie różnic
         saliency = saliency / np.max(saliency)  # Normalizacja do zakresu [0, 1]
 
-        # Tworzymy obraz z 3 kategoriami kolorów
-        saliency_colored = np.zeros((*saliency.shape, 3))  # Nowy obraz w przestrzeni RGB
-
-        for i in range(saliency.shape[0]):
-            for j in range(saliency.shape[1]):
-                if saliency[i, j] == 0:
-                    saliency_colored[i, j] = [0, 0, 0]  # Kategoria 1 - brak aktywności (czarne)
-                elif saliency[i, j] <= 0.5:
-                    saliency_colored[i, j] = [1, 1, 0]  # Kategoria 2 - aktywność do 50% (żółte)
-                else:
-                    saliency_colored[i, j] = [1, 0, 0]  # Kategoria 3 - aktywność powyżej 50% (czerwone)
-
-        return saliency_colored
+        return saliency
 
     def __del__(self):
         self.clear_hooks()
