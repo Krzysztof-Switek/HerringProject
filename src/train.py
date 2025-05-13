@@ -231,7 +231,7 @@ class Trainer:
                 patience_counter += 1
 
             # Jeśli accuracy na zbiorze walidacyjnym nie poprawia się przez 'patience' epok, zatrzymaj trening
-            if patience_counter >= 5:  # Możesz dostosować liczbę epok, np. 5
+            if patience_counter >= 35:  # Możesz dostosować liczbę epok, np. 5
                 print(f"Early stopping triggered at epoch {epoch + 1}")
                 break
 

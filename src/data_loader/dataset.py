@@ -1,8 +1,7 @@
-import os
-import torch
 from torchvision import datasets, transforms
 from torch.utils.data import DataLoader
-from omegaconf import DictConfig
+import os
+import torch
 
 
 class HerringDataset:
@@ -21,6 +20,7 @@ class HerringDataset:
     def _get_train_transforms(self) -> transforms.Compose:
         """Transformacje z augmentacją dla danych treningowych"""
         return transforms.Compose([
+            # Random zmiana jasności, kontrastu, nasycenia, barwy
             transforms.RandomApply([
                 transforms.ColorJitter(
                     brightness=0.2,
@@ -29,13 +29,25 @@ class HerringDataset:
                     hue=0.05
                 )
             ], p=0.4),
+
+            # Losowa rotacja, przesunięcie, skalowanie
             transforms.RandomAffine(
                 degrees=15,
                 translate=(0.1, 0.1),
                 scale=(0.9, 1.1),
                 shear=10
             ),
+
+            # Losowe odbicie poziome
             transforms.RandomHorizontalFlip(p=0.5),
+
+            # Zastosowanie losowego zniekształcenia obrazu
+            transforms.RandomPerspective(distortion_scale=0.5, p=0.5, interpolation=3),
+
+            # Losowe usuwanie fragmentów obrazu (Random Erasing)
+            transforms.RandomErasing(p=0.5),
+
+            # Zmiana rozmiaru i normalizacja
             transforms.Resize((self.cfg.image_size, self.cfg.image_size)),
             transforms.ToTensor(),
             transforms.Normalize(

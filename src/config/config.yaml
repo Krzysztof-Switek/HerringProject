@@ -20,17 +20,17 @@ model:
 #  base_model: "vit_h_14"                       # image_size: 384       #
 #  base_model: "resnet50"                        # image_size: 224      #
 #  base_model: "regnety_032"                    # image_size: 384       #
-#               "efficientnet_v2_l"               # image_size: 480     #                                                 #
+#               "efficientnet_v2_l"               # image_size: 480                                                        #
 ######################### ALTERNATYWNE MODELE ###########################
 
 training:
-  epochs: 100
-  learning_rate: 0.0001
+  epochs: 150
+  learning_rate: 0.00001
   device: "auto"
   checkpoint_dir: "../../checkpoints"           # miejsce zapisu modelu
 
 prediction:
-  model_path: "checkpoints/Resnet50_processed_photos/resnet50_epoch_8_acc_79.33.pth"
+  model_path: "checkpoints/resnet50_epoch_42_acc_83.17.pth"
   image_path: "data/test/Głębia_Gdańska_0013_otsu_OBRYS_1.jpg"
   results_dir: "results/gradcam"
   show_visualization: true
