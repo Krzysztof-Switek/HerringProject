@@ -20,7 +20,7 @@ model:
 #  base_model: "vit_h_14"                       # image_size: 384       #
 #  base_model: "resnet50"                        # image_size: 224      #
 #  base_model: "regnety_032"                    # image_size: 384       #
-#               "efficientnet_v2_l"               # image_size: 480                                                        #
+#               "efficientnet_v2_l"               # image_size: 480     #                                                 #
 ######################### ALTERNATYWNE MODELE ###########################
 
 training:

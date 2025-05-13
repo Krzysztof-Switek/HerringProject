@@ -211,7 +211,7 @@ class GuidedBackprop(BaseHeatmapGenerator):
 
         # Zastosowanie logarytmicznej normalizacji (tylko dla kontrastu)
         saliency = np.log1p(saliency)  # Logarytmiczne uwydatnienie różnic
-        saliency = saliency / np.max(saliency)  # Normalizacja do zakresu [0, 1]
+        saliency = saliency / np.max(saliency)
 
         return saliency
 
