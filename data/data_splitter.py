@@ -103,8 +103,8 @@ if __name__ == "__main__":
     print("📂 Ostateczna struktura katalogów:")
     print("""
     data/
-    ├── 1/              # Oryginalne zdjęcia klasy 1
-    ├── 2/              # Oryginalne zdjęcia klasy 2
+    ├── 1/              # Oryginalne zdjęcia klasy 0
+    ├── 2/              # Oryginalne zdjęcia klasy 1
     ├── train/
     │   ├── 1/
     │   └── 2/

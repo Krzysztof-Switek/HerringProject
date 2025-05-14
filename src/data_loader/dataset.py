@@ -1,7 +1,8 @@
-from torchvision import datasets, transforms
-from torch.utils.data import DataLoader
 import os
 import torch
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+from omegaconf import DictConfig
 
 
 class HerringDataset:
@@ -17,43 +18,35 @@ class HerringDataset:
         self.train_transform = self._get_train_transforms()
         self.val_transform = self._get_val_transforms()
 
+        # Sprawdzamy, czy etykiety w zbiorze danych zgadzają się z nazwami katalogów
+        self._validate_labels()
+
     def _get_train_transforms(self) -> transforms.Compose:
         """Transformacje z augmentacją dla danych treningowych"""
         return transforms.Compose([
-            # Random zmiana jasności, kontrastu, nasycenia, barwy
-            transforms.RandomApply([
-                transforms.ColorJitter(
-                    brightness=0.2,
-                    contrast=0.2,
-                    saturation=0.2,
-                    hue=0.05
-                )
-            ], p=0.4),
-
-            # Losowa rotacja, przesunięcie, skalowanie
+            transforms.RandomRotation(30),  # Losowy obrót do 30 stopni
+            transforms.RandomResizedCrop(self.cfg.image_size, scale=(0.8, 1.0)),  # Losowe przycięcie i skalowanie
+            transforms.RandomHorizontalFlip(p=0.5),  # Losowe odbicie w poziomie
+            transforms.RandomVerticalFlip(p=0.5),  # Losowe odbicie w pionie
+            transforms.ColorJitter(
+                brightness=0.2,
+                contrast=0.2,
+                saturation=0.2,
+                hue=0.05
+            ),
             transforms.RandomAffine(
                 degrees=15,
                 translate=(0.1, 0.1),
                 scale=(0.9, 1.1),
                 shear=10
             ),
-
-            # Losowe odbicie poziome
-            transforms.RandomHorizontalFlip(p=0.5),
-
-            # Zastosowanie losowego zniekształcenia obrazu
-            transforms.RandomPerspective(distortion_scale=0.5, p=0.5, interpolation=3),
-
-            # Losowe usuwanie fragmentów obrazu (Random Erasing)
-            transforms.RandomErasing(p=0.5),
-
-            # Zmiana rozmiaru i normalizacja
-            transforms.Resize((self.cfg.image_size, self.cfg.image_size)),
-            transforms.ToTensor(),
+            transforms.Resize((self.cfg.image_size, self.cfg.image_size)),  # Zmiana rozmiaru obrazu
+            transforms.ToTensor(),  # Konwersja na tensor
             transforms.Normalize(
                 mean=[0.485, 0.456, 0.406],
                 std=[0.229, 0.224, 0.225]
-            )
+            ),
+            transforms.GaussianBlur(kernel_size=3)  # Dodanie rozmycia Gaussa
         ])
 
     def _get_val_transforms(self) -> transforms.Compose:
@@ -83,6 +76,29 @@ class HerringDataset:
 
             if not os.listdir(path):
                 raise RuntimeError(f"Katalog {name} jest pusty: {path}")
+
+    def _validate_labels(self):
+        """Weryfikacja zgodności etykiet z nazwami katalogów"""
+        base_path = os.path.join(os.path.dirname(__file__), '../../..', self.cfg.root_dir)
+        train_dir = os.path.join(base_path, 'train')
+        val_dir = os.path.join(base_path, 'val')
+
+        # Etykiety to nazwy katalogów w 'train' i 'val'
+        train_labels = sorted(os.listdir(train_dir))
+        val_labels = sorted(os.listdir(val_dir))
+
+        # Sprawdzamy, czy etykiety są zgodne z nazwami katalogów
+        expected_labels = ['0', '1']
+
+        if train_labels != expected_labels:
+            raise ValueError(
+                f"Niepoprawne etykiety w katalogu 'train'. Oczekiwano {expected_labels}, ale znaleziono {train_labels}")
+
+        if val_labels != expected_labels:
+            raise ValueError(
+                f"Niepoprawne etykiety w katalogu 'val'. Oczekiwano {expected_labels}, ale znaleziono {val_labels}")
+
+        print(f"Zgodność etykiet w katalogach: 'train' i 'val' jest poprawna.")
 
     def get_loaders(self) -> tuple:
         """
