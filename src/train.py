@@ -11,6 +11,7 @@ import csv
 import subprocess
 import os
 
+
 class Trainer:
     def __init__(self, config_path: str = None):
         """
@@ -87,18 +88,18 @@ class Trainer:
                     f"Expected structure:\n"
                     f"data/\n"
                     f"├── train/\n"
-                    f"│   ├── 1/\n"
-                    f"│   └── 2/\n"
+                    f"│   ├── 0/\n"
+                    f"│   └── 1/\n"
                     f"└── val/\n"
-                    f"    ├── 1/\n"
-                    f"    └── 2/"
+                    f"    ├── 0/\n"
+                    f"    └── 1/"
                 )
 
             class_dirs = [d for d in dir_path.iterdir() if d.is_dir()]
             if not class_dirs:
                 raise FileNotFoundError(
                     f"No class directories found in {dir_path}\n"
-                    f"Each directory should contain subdirectories '1/' and '2/'"
+                    f"Each directory should contain subdirectories '0/' and '1/'"
                 )
 
             print(f"Found {len(class_dirs)} class directories in {name}")
@@ -231,7 +232,7 @@ class Trainer:
                 patience_counter += 1
 
             # Jeśli accuracy na zbiorze walidacyjnym nie poprawia się przez 'patience' epok, zatrzymaj trening
-            if patience_counter >= 35:  # Możesz dostosować liczbę epok, np. 5
+            if patience_counter >= 5:  # Możesz dostosować liczbę epok, np. 5
                 print(f"Early stopping triggered at epoch {epoch + 1}")
                 break
 

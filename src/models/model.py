@@ -4,7 +4,6 @@ from omegaconf import DictConfig
 import torch
 import warnings
 
-
 class HerringModel(nn.Module):
     def __init__(self, config: DictConfig):
         super().__init__()
@@ -31,8 +30,17 @@ class HerringModel(nn.Module):
         # Handle weights
         weights = None
         if self.cfg.pretrained:
-            if hasattr(models, f"{self.cfg.base_model}_Weights"):
-                weights = getattr(models, f"{self.cfg.base_model}_Weights").DEFAULT
+            if self.cfg.base_model == "resnet50":
+                # Manually load pre-trained weights for resnet50
+                weights = models.ResNet50_Weights.IMAGENET1K_V1
+            elif self.cfg.base_model == "efficientnet_v2_l":
+                weights = models.EfficientNet_V2_L_Weights.IMAGENET1K_V1
+            elif self.cfg.base_model == "convnext_large":
+                weights = models.ConvNeXt_Large_Weights.IMAGENET1K_V1
+            elif self.cfg.base_model == "vit_h_14":
+                weights = models.ViT_H_14_Weights.IMAGENET1K_V1
+            elif self.cfg.base_model == "regnety_032":
+                weights = models.RegNetY_032_Weights.IMAGENET1K_V1
             else:
                 warnings.warn(f"No weights enum for {self.cfg.base_model}, using default initialization")
                 weights = "DEFAULT"
@@ -40,12 +48,12 @@ class HerringModel(nn.Module):
         # Initialize model
         model = getattr(models, self.cfg.base_model)(weights=weights)
 
-        # Freeze layers if needed
+        # Freeze layers if needed (especially useful for transfer learning)
         if self.cfg.freeze_encoder:
             for param in model.parameters():
                 param.requires_grad = False
 
-        # Model-specific classifier replacement
+        # Modify the classifier to match the number of classes
         dropout_p = getattr(self.cfg, "dropout_rate", 0.0)
         classifier_path = model_config[self.cfg.base_model]["classifier"].split('.')
 
