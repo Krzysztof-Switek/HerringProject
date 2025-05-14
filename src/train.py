@@ -10,6 +10,7 @@ from sklearn.metrics import precision_score, recall_score, f1_score
 import csv
 import subprocess
 import os
+from datetime import datetime
 
 
 class Trainer:
@@ -36,10 +37,18 @@ class Trainer:
         # 5. Inicjalizacja komponentów
         self.model = HerringModel(self.cfg).to(self.device)
         self.data_loader = HerringDataset(self.cfg)
-        self.writer = self._init_tensorboard()
+
+        # Dynamiczny katalog do zapisu logów TensorBoard
+        current_date = datetime.now().strftime("%d-%m")
+        model_name = self.cfg.model.base_model
+        log_dir = self.project_root / "results" / "logs" / f"{model_name}_{current_date}"
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        self.writer = self._init_tensorboard(log_dir)
 
         # Inicjalizacja pliku do zapisywania metryk
-        self.metrics_file = open("training_metrics.csv", mode="w", newline="")
+        metrics_file_path = log_dir / "training_metrics.csv"
+        self.metrics_file = open(metrics_file_path, mode="w", newline="")
         self.metrics_writer = csv.writer(self.metrics_file)
         self.metrics_writer.writerow(['Epoch', 'Train Loss', 'Train Accuracy', 'Train Precision', 'Train Recall', 'Train F1', 'Val Loss', 'Val Accuracy', 'Val Precision', 'Val Recall', 'Val F1'])
 
@@ -106,11 +115,9 @@ class Trainer:
 
         print("Data structure validation passed successfully")
 
-    def _init_tensorboard(self):
+    def _init_tensorboard(self, log_dir):
         """Inicjalizacja TensorBoard z obsługą błędów"""
-        log_dir = self.project_root / "results" / "logs"
         try:
-            log_dir.mkdir(parents=True, exist_ok=True)
             return SummaryWriter(log_dir=str(log_dir))
         except Exception as e:
             print(f"Warning: TensorBoard initialization failed. Error: {str(e)}")
