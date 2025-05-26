@@ -4,10 +4,10 @@ data:
   val: "val"                                    # podkatalog walidacyjny
   test: "test"                                  # podkatalog testowy
   batch_size: 32
-  image_size: 480                               # rozmiar wejściowy dla modelu
+  image_size: 224                               # rozmiar wejściowy dla modelu
 
 model:
-  base_model: "efficientnet_v2_l"                        # image_size: 224
+  base_model: "resnet50"                        # image_size: 224
   num_classes: 2
   pretrained: true
   freeze_encoder: false
@@ -30,7 +30,7 @@ training:
   checkpoint_dir: "../../checkpoints"           # miejsce zapisu modelu
 
 prediction:
-  model_path: "checkpoints/resnet50_epoch_21_acc_83.22.pth"
+  model_path: "checkpoints/efficientnet_v2_l_epoch_14_acc_84.71.pth"
   image_path: "data/test/Głębia_Gdańska_0013_otsu_OBRYS_1.jpg"
   results_dir: "results/gradcam"
   show_visualization: true
@@ -50,6 +50,6 @@ visualization:
   display_mode: 'matrix'
   matrix_cols: 3
   save_individual: False
-  target_layer: "base.features.8.0"           #resnet50:"base.layer4.2.conv3"; efficientnet:"base.features.8.0"
+  target_layer: "base.layer4.2.conv3"           #resnet50:"base.layer4.2.conv3"; efficientnet:"base.features.8.0"
   colormap: "jet"
   alpha: 0.5
