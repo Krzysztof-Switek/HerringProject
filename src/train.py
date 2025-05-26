@@ -146,7 +146,7 @@ class Trainer:
 
             self._save_metrics(epoch, train_loss, train_acc, train_precision, train_recall, train_f1,
                                val_loss, val_acc, val_precision, val_recall, val_f1)
-
+            #new tensorboard
             if self.writer:
                 self.writer.add_scalar("Loss/train", train_loss, epoch)
                 self.writer.add_scalar("Loss/val", val_loss, epoch)
