@@ -8,8 +8,6 @@ from data_loader.dataset import HerringDataset
 from models.model import HerringModel
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
 import csv
-import subprocess
-import os
 import time
 import numpy as np
 from datetime import datetime

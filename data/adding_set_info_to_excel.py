@@ -17,9 +17,9 @@ def load_file_list(path: Path, set_name: str) -> pd.DataFrame:
 def main():
     # Ścieżki
     excel_path = Path("C:/Users/kswitek/Documents/HerringProject/src/data_loader/AnalysisWithOtolithPhoto.xlsx")
-    train_txt = Path("C:/Users/kswitek/Documents/HerringProject/data/train/train_files.txt")
-    val_txt = Path("C:/Users/kswitek/Documents/HerringProject/data/val/val_files.txt")
-    test_txt = Path("C:/Users/kswitek/Documents/HerringProject/data/test/test_files.txt")
+    train_txt = Path("/data/server_data/train_files.txt")
+    val_txt = Path("/data/server_data/val_files.txt")
+    test_txt = Path("/data/server_data/test_files.txt")
 
     # Wczytaj Excel i dodaj FileName
     df_excel = pd.read_excel(excel_path)
