@@ -10,7 +10,10 @@ from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_sco
 import csv
 import time
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 from datetime import datetime
+
 
 class Trainer:
     def __init__(self, config_path: str = None):
@@ -28,16 +31,17 @@ class Trainer:
         log_dir = self.project_root / "results" / "logs" / f"{model_name}_{current_date}"
         log_dir.mkdir(parents=True, exist_ok=True)
 
-        self.writer = self._init_tensorboard(log_dir)
+        self.writer = SummaryWriter(log_dir=str(log_dir))
         self.log_dir = log_dir
-        metrics_file_path = log_dir / "training_metrics.csv"
-        self.metrics_file = open(metrics_file_path, mode="w", newline="")
+
+        self.csv_path = log_dir / "training_metrics.csv"
+        self.metrics_file = open(self.csv_path, mode="w", newline="")
         self.metrics_writer = csv.writer(self.metrics_file)
         self.metrics_writer.writerow([
             'Epoch', 'Train Samples', 'Val Samples', 'Train Class 0', 'Train Class 1',
             'Train Loss', 'Train Accuracy', 'Train Precision', 'Train Recall', 'Train F1', 'Train AUC',
             'Val Loss', 'Val Accuracy', 'Val Precision', 'Val Recall', 'Val F1', 'Val AUC',
-            'Train Time (s)'
+            'Train Time (s)', 'Augmentations'
         ])
 
     def _load_config(self, config_path):
@@ -60,24 +64,29 @@ class Trainer:
                 raise FileNotFoundError(f"Missing directory: {split_path}")
         print("Data structure validated.")
 
-    def _init_tensorboard(self, log_dir):
-        try:
-            return SummaryWriter(log_dir=str(log_dir))
-        except Exception as e:
-            print(f"TensorBoard init failed: {e}")
-            return None
-
     def _get_class_distribution(self, targets):
         values, counts = np.unique(targets, return_counts=True)
         class_dist = {int(v): int(c) for v, c in zip(values, counts)}
         return class_dist.get(0, 0), class_dist.get(1, 0)
 
+    def _plot_confusion_matrix(self, cm):
+        fig, ax = plt.subplots(figsize=(4, 4))
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax, cbar=False)
+        ax.set_xlabel("Predicted")
+        ax.set_ylabel("True")
+        ax.set_title("Confusion Matrix")
+        return fig
+
     def _train_epoch(self, train_loader, optimizer, criterion):
         self.model.train()
         stats = {'loss': 0.0, 'correct': 0, 'total': 0}
         all_targets, all_preds, all_probs = [], [], []
+        aug_count = 0
 
         for inputs, targets in train_loader:
+            if hasattr(inputs, 'shape') and inputs.shape[0] > 1:
+                aug_count += 1
+
             inputs, targets = inputs.to(self.device), targets.to(self.device)
             optimizer.zero_grad()
             outputs = self.model(inputs)
@@ -103,7 +112,7 @@ class Trainer:
         f1 = f1_score(all_targets, all_preds)
         auc = roc_auc_score(all_targets, all_probs)
 
-        return loss, acc, precision, recall, f1, auc, all_targets
+        return loss, acc, precision, recall, f1, auc, all_targets, aug_count
 
     def _validate(self, val_loader, criterion):
         self.model.eval()
@@ -115,6 +124,7 @@ class Trainer:
                 inputs, targets = inputs.to(self.device), targets.to(self.device)
                 outputs = self.model(inputs)
                 loss = criterion(outputs, targets)
+
                 stats['loss'] += loss.item()
                 probs = torch.softmax(outputs, dim=1)[:, 1].cpu().numpy()
                 preds = outputs.argmax(dim=1).cpu().numpy()
@@ -132,8 +142,8 @@ class Trainer:
         recall = recall_score(all_targets, all_preds)
         f1 = f1_score(all_targets, all_preds)
         auc = roc_auc_score(all_targets, all_probs)
-
         cm = confusion_matrix(all_targets, all_preds)
+
         return loss, acc, precision, recall, f1, auc, cm, all_targets
 
     def train(self):
@@ -145,7 +155,7 @@ class Trainer:
 
         for epoch in range(self.cfg.training.epochs):
             start_time = time.time()
-            train_loss, train_acc, train_prec, train_rec, train_f1, train_auc, train_targets = self._train_epoch(train_loader, optimizer, criterion)
+            train_loss, train_acc, train_prec, train_rec, train_f1, train_auc, train_targets, aug_count = self._train_epoch(train_loader, optimizer, criterion)
             val_loss, val_acc, val_prec, val_rec, val_f1, val_auc, val_cm, val_targets = self._validate(val_loader, criterion)
             epoch_time = time.time() - start_time
 
@@ -153,41 +163,34 @@ class Trainer:
             val_samples = len(val_targets)
             train_samples = len(train_targets)
 
-            print(f"\nEpoch {epoch + 1}/{self.cfg.training.epochs}:")
-            print(f"Train - Loss: {train_loss:.4f}, Acc: {train_acc:.2f}%, Precision: {train_prec:.2f}, Recall: {train_rec:.2f}, F1: {train_f1:.2f}, AUC: {train_auc:.2f}")
-            print(f"Val   - Loss: {val_loss:.4f}, Acc: {val_acc:.2f}%, Precision: {val_prec:.2f}, Recall: {val_rec:.2f}, F1: {val_f1:.2f}, AUC: {val_auc:.2f}")
-            print(f"Train class dist: 0: {train_c0}, 1: {train_c1}, Time: {epoch_time:.1f}s")
+            print(f"\nEpoch {epoch + 1}/{self.cfg.training.epochs} | Time: {epoch_time:.1f}s")
+            print(f"Train: Loss={train_loss:.4f} Acc={train_acc:.2f}% Prec={train_prec:.2f} Rec={train_rec:.2f} F1={train_f1:.2f} AUC={train_auc:.2f}")
+            print(f"Val:   Loss={val_loss:.4f} Acc={val_acc:.2f}% Prec={val_prec:.2f} Rec={val_rec:.2f} F1={val_f1:.2f} AUC={val_auc:.2f}")
 
+            # Zapis do CSV
             self.metrics_writer.writerow([
                 epoch + 1, train_samples, val_samples, train_c0, train_c1,
                 train_loss, train_acc, train_prec, train_rec, train_f1, train_auc,
-                val_loss, val_acc, val_prec, val_rec, val_f1, val_auc, round(epoch_time, 2)
+                val_loss, val_acc, val_prec, val_rec, val_f1, val_auc,
+                round(epoch_time, 2), aug_count
             ])
 
-            if self.writer:
-                self.writer.add_scalars("Loss", {"train": train_loss, "val": val_loss}, epoch)
-                self.writer.add_scalars("Accuracy", {"train": train_acc, "val": val_acc}, epoch)
-                self.writer.add_scalars("Precision", {"train": train_prec, "val": val_prec}, epoch)
-                self.writer.add_scalars("Recall", {"train": train_rec, "val": val_rec}, epoch)
-                self.writer.add_scalars("F1", {"train": train_f1, "val": val_f1}, epoch)
-                self.writer.add_scalars("AUC", {"train": train_auc, "val": val_auc}, epoch)
-                self.writer.add_figure("Val Confusion Matrix", self._plot_confusion_matrix(val_cm), epoch)
+            # TensorBoard
+            self.writer.add_scalars("Loss", {"train": train_loss, "val": val_loss}, epoch)
+            self.writer.add_scalars("Accuracy", {"train": train_acc, "val": val_acc}, epoch)
+            self.writer.add_scalars("Precision", {"train": train_prec, "val": val_prec}, epoch)
+            self.writer.add_scalars("Recall", {"train": train_rec, "val": val_rec}, epoch)
+            self.writer.add_scalars("F1", {"train": train_f1, "val": val_f1}, epoch)
+            self.writer.add_scalars("AUC", {"train": train_auc, "val": val_auc}, epoch)
+            self.writer.add_scalar("Augmentations", aug_count, epoch)
+            self.writer.add_scalar("Epoch Time", epoch_time, epoch)
+            self.writer.add_figure("Val Confusion Matrix", self._plot_confusion_matrix(val_cm), epoch)
 
             scheduler.step()
 
         self.metrics_file.close()
-        if self.writer:
-            self.writer.close()
+        self.writer.close()
 
-    def _plot_confusion_matrix(self, cm):
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        fig, ax = plt.subplots(figsize=(4, 4))
-        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax, cbar=False)
-        ax.set_xlabel("Predicted")
-        ax.set_ylabel("True")
-        ax.set_title("Confusion Matrix")
-        return fig
 
 if __name__ == "__main__":
     try:
@@ -196,5 +199,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error: {e}")
         raise
-
-##
