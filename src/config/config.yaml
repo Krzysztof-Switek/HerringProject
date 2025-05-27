@@ -1,5 +1,5 @@
 data:
-  root_dir: "../../data"                        # główny katalog danych
+  root_dir: "data"                        # główny katalog danych
   train: "train"                                # podkatalog treningowy
   val: "val"                                    # podkatalog walidacyjny
   test: "test"                                  # podkatalog testowy
@@ -30,7 +30,7 @@ training:
   checkpoint_dir: "../../checkpoints"           # miejsce zapisu modelu
 
 prediction:
-  model_path: "checkpoints/efficientnet_v2_l_epoch_14_acc_84.71.pth"
+  model_path: "checkpoints/resnet50_epoch_19_acc_83.48.pth"
   image_path: "data/test/Głębia_Gdańska_0013_otsu_OBRYS_1.jpg"
   results_dir: "results/gradcam"
   show_visualization: true
