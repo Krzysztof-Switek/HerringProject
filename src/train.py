@@ -69,7 +69,7 @@ class Trainer:
 
         cfg = OmegaConf.load(config_path)
 
-        # 🔧 Ustawienie pełnych ścieżek
+        # 🔧 Ustawienie  ścieżek
         if not Path(cfg.data.metadata_file).is_absolute():
             cfg.data.metadata_file = str(self.project_root / cfg.data.metadata_file)
         if not Path(cfg.data.root_dir).is_absolute():
