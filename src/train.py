@@ -63,14 +63,20 @@ class Trainer:
             np.savez(cm_path, matrix=self.best_cm, labels=np.array(self.class_names))
             print(f"📊 Confusion matrix with labels saved to: {cm_path}")
 
-    def _load_config(self, config_path):
+    def _load_config(self, config_path: str = None):
         if config_path is None:
             config_path = self.project_root / "src" / "config" / "config.yaml"
-        if not Path(config_path).exists():
-            raise FileNotFoundError(f"Config file not found at: {config_path}")
+
         cfg = OmegaConf.load(config_path)
-        cfg.data.root_dir = str(self.project_root / "data")
-        cfg.data.metadata_file = str(self.project_root / cfg.data.metadata_file)
+
+        # 🔧 Ustawienie pełnych ścieżek
+        if not Path(cfg.data.metadata_file).is_absolute():
+            cfg.data.metadata_file = str(self.project_root / cfg.data.metadata_file)
+        if not Path(cfg.data.root_dir).is_absolute():
+            cfg.data.root_dir = str(self.project_root / cfg.data.root_dir)
+        if not Path(cfg.training.checkpoint_dir).is_absolute():
+            cfg.training.checkpoint_dir = str(self.project_root / cfg.training.checkpoint_dir)
+
         return cfg
 
     def _init_device(self):
