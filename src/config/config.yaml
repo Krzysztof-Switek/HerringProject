@@ -1,4 +1,5 @@
 data:
+  metadata_file: "src/data_loader/AnalysisWithOtolithPhoto_with_sets.xlsx"
   root_dir: "data"                        # główny katalog danych
   train: "train"                                # podkatalog treningowy
   val: "val"                                    # podkatalog walidacyjny
@@ -24,9 +25,11 @@ model:
 ######################### ALTERNATYWNE MODELE ###########################
 
 training:
+  stop_after_one_epoch: true
   epochs: 150
   learning_rate: 0.00001
   device: "auto"
+  early_stopping_patience: 5
   checkpoint_dir: "../../checkpoints"           # miejsce zapisu modelu
 
 prediction:

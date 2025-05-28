@@ -2,6 +2,8 @@ import os
 import random
 import shutil
 from tqdm import tqdm
+import pandas as pd
+from pathlib import Path
 
 class DataSplitter:
     def __init__(self, base_dir=".", source_subdir="server_data", train_ratio=0.7, val_ratio=0.2, seed=42):
@@ -36,6 +38,7 @@ class DataSplitter:
             self._process_class(class_dir)
 
         self._save_file_lists()
+        self._update_excel_with_sets()
 
     def _create_split_dirs(self, class_dirs):
         for split in ["train", "val", "test"]:
@@ -79,11 +82,43 @@ class DataSplitter:
 
     def _save_file_lists(self):
         for split, files in self.split_files.items():
-            list_path = os.path.join(self.target_dir, split, f"{split}_files.txt")
+            list_path = os.path.join(self.target_dir, f"{split}_files.txt")
             with open(list_path, "w", encoding="utf-8") as f:
                 for file in sorted(files):
                     f.write(file + "\n")
             print(f"📝 Zapisano listę plików do {list_path}")
+
+    def _extract_filename(self, path: str) -> str:
+        return Path(path).name.lower()
+
+    def _extract_filename_from_txt(self, line: str) -> str:
+        return line.strip().split("\\")[-1].lower()
+
+    def _load_file_list(self, path: Path, set_name: str) -> pd.DataFrame:
+        with open(path, "r", encoding="utf-8") as f:
+            filenames = [self._extract_filename_from_txt(line) for line in f.readlines()]
+        return pd.DataFrame({"FileName": filenames, "SET": set_name})
+
+    def _update_excel_with_sets(self):
+        excel_path = Path(self.base_dir) / "src" / "data_loader" / "AnalysisWithOtolithPhoto.xlsx"
+        train_txt = Path(self.target_dir) / "train_files.txt"
+        val_txt = Path(self.target_dir) / "val_files.txt"
+        test_txt = Path(self.target_dir) / "test_files.txt"
+
+        df_excel = pd.read_excel(excel_path)
+        if "FilePath" not in df_excel.columns:
+            raise ValueError("Brak kolumny 'FilePath' w pliku Excel.")
+
+        df_excel["FileName"] = df_excel["FilePath"].apply(self._extract_filename)
+        train_df = self._load_file_list(train_txt, "TRAIN")
+        val_df = self._load_file_list(val_txt, "VAL")
+        test_df = self._load_file_list(test_txt, "TEST")
+        all_sets_df = pd.concat([train_df, val_df, test_df], ignore_index=True)
+        merged_df = pd.merge(df_excel, all_sets_df, how="left", on="FileName")
+
+        output_path = excel_path.parent / "AnalysisWithOtolithPhoto_with_sets.xlsx"
+        merged_df.to_excel(output_path, index=False)
+        print(f"✅ Zaktualizowany plik Excel zapisany: {output_path}")
 
 if __name__ == "__main__":
     splitter = DataSplitter(
@@ -102,15 +137,16 @@ if __name__ == "__main__":
     print("""
     data/
     ├── train/
-    │   ├── 0/
     │   ├── 1/
-    │   └── train_files.txt
+    │   ├── 2/
     ├── val/
-    │   ├── 0/
     │   ├── 1/
-    │   └── val_files.txt
+    │   ├── 2/
     ├── test/
-    │   ├── 0/
     │   ├── 1/
-    │   └── test_files.txt
+    │   ├── 2/
+    ├── train_files.txt
+    ├── val_files.txt
+    ├── test_files.txt
+    └── AnalysisWithOtolithPhoto_with_sets.xlsx
     """)
