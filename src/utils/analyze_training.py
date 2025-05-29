@@ -91,39 +91,53 @@ def plot_metrics(metrics):
 def plot_confusion_matrix(cm, labels):
     if cm is None:
         return None
-    # ✅ ZMIANA: większy, bardziej czytelny rozmiar
+
     fig, ax = plt.subplots(figsize=(5, 5))
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False,
                 xticklabels=labels, yticklabels=labels, ax=ax)
     ax.set_xlabel("Predicted")
     ax.set_ylabel("True")
     ax.set_title("Confusion Matrix")
-    # ✅ ZMIANA: poprawione marginesy
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     return fig
 
-def create_summary_page(metrics):
+def create_summary_page(metrics, augment_df):
     last_epoch = metrics['Epoch'].max()
     final_row = metrics[metrics['Epoch'] == last_epoch].iloc[0]
     fig, ax = plt.subplots(figsize=(8.5, 11))
     ax.axis("off")
 
-    lines = [
-        " PODSUMOWANIE TRENINGU ",
+    lines = ["PODSUMOWANIE DANYCH TRENINGOWYCH", ""]
+    if augment_df is not None:
+        df = augment_df.copy()
+        grouped = df.groupby("Populacja").agg({
+            "Łącznie": "sum",
+            "AugmentacjaZastosowana": "sum"
+        }).astype(int)
+
+        for pop, row in grouped.iterrows():
+            lines.append(f"Populacja {pop}:")
+            lines.append(f"  - Oryginalnych próbek: {row['Łącznie']}")
+            lines.append(f"  - Augmentowanych:      {row['AugmentacjaZastosowana']}")
+            lines.append(f"  - Razem:               {row['Łącznie'] + row['AugmentacjaZastosowana']}")
+            lines.append("")
+
+    lines.extend([
+        "PODSUMOWANIE TRENINGU",
         "",
         f"Model: {log_dir.split('_')[0]}",
         f"Liczba epok: {last_epoch}",
         f"Val Accuracy: {final_row['Val Accuracy']:.2f}",
         f"Val F1: {final_row['Val F1']:.2f}",
         f"Val AUC: {final_row['Val AUC']:.2f}",
-    ]
+    ])
 
     if last_epoch < metrics.shape[0]:
         lines.append("\n⛔ Early stopping aktywowany")
 
-    # ✅ ZMIANA: zmniejszony font i margines
-    ax.text(0.07, 0.93, "\n".join(lines), fontsize=11, va='top', family='monospace')
+    ax.text(0.05, 0.95, "\n".join(lines), fontsize=11, va='top', family='monospace')
     return fig
+
 
 def main():
     metrics, confusion_matrix, labels, augment_df = load_metrics(log_dir)
@@ -131,7 +145,7 @@ def main():
 
     fig1 = plot_metrics(metrics)
     fig2 = plot_confusion_matrix(confusion_matrix, labels)
-    fig3 = create_summary_page(metrics)
+    fig3 = create_summary_page(metrics, augment_df)
 
     plt.show()
 

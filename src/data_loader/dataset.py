@@ -37,11 +37,11 @@ class AugmentWrapper(torch.utils.data.Dataset):
         count = self.class_counts.get((pop, wiek), 0)
 
         # 🔧 DODANE: bezpieczne minimum count
-        # rarity_ratio = self.max_count / max(count, 1)
-        #prob = min(1.0, rarity_ratio / 10.0)
+        desired_total = self.max_count
+        augment_needed = max(0, desired_total - count)
+        prob = min(1.0, augment_needed / desired_total)
 
-
-        prob = 0.5                                                  # 🔧 TEST: stałe prawdopodobieństwo augmentacji
+        #prob = 0.5                                                  # 🔧 TEST: stałe prawdopodobieństwo augmentacji
 
         if torch.rand(1).item() < prob:
             self.augment_applied[(pop, wiek)] += 1
