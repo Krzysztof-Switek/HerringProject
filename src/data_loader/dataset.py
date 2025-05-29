@@ -23,20 +23,37 @@ class AugmentWrapper(torch.utils.data.Dataset):
     def __getitem__(self, index):
         path, label = self.base_dataset.samples[index]
         image = self.base_dataset.loader(path)
-        fname = os.path.basename(path)
-        if fname in self.metadata:
-            pop, wiek = self.metadata[fname]
-            count = self.class_counts.get((pop, wiek), 0)
-            rarity_ratio = self.max_count / (count + 1e-5)
-            prob = min(1.0, rarity_ratio / 10.0)
-            if torch.rand(1).item() < prob:
-                self.augment_applied[(pop, wiek)] += 1
-                transform = self.transform_strong
-            else:
-                transform = self.transform_base
+
+        # 🔧 DODANE: lepsza normalizacja nazwy pliku
+        fname = os.path.basename(path).strip().replace(" ", "_").lower()
+
+        # 🔍 DODANE: test obecności w metadanych
+        if fname not in self.metadata:
+            print(f"⚠️ Nie znaleziono metadanych dla pliku: {fname}")
+            transform = self.transform_base
+            return transform(image), label
+
+        pop, wiek = self.metadata[fname]
+        count = self.class_counts.get((pop, wiek), 0)
+
+        # 🔧 DODANE: bezpieczne minimum count
+        # rarity_ratio = self.max_count / max(count, 1)
+        #prob = min(1.0, rarity_ratio / 10.0)
+
+
+        prob = 0.5                                                  # 🔧 TEST: stałe prawdopodobieństwo augmentacji
+
+        if torch.rand(1).item() < prob:
+            self.augment_applied[(pop, wiek)] += 1
+            transform = self.transform_strong
+            # 🔍 logowanie augmentacji
+            if self.augment_applied[(pop, wiek)] < 5:  # ogranicz do kilku logów
+                print(f"✨ Augmentacja dla ({pop}, {wiek}) - count: {count}, prob: {prob:.2f}")
         else:
             transform = self.transform_base
+
         return transform(image), label
+
 
 class HerringDataset:
     def __init__(self, config: DictConfig):
@@ -67,7 +84,7 @@ class HerringDataset:
         df["Populacja"] = df["Populacja"].astype(int)
 
         return {
-            str(row["FileName"]).strip(): (int(row["Populacja"]), int(row["Wiek"]))
+            str(row["FileName"]).strip().lower(): (int(row["Populacja"]), int(row["Wiek"]))
             for _, row in df.iterrows()
         }
 
