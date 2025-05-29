@@ -8,7 +8,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 # ============================
 # 🔧 USTAWIENIA UŻYTKOWNIKA
-log_dir = "resnet50_28-05"
+log_dir = "resnet50_29-05"
 # ============================
 
 def load_metrics(log_dir):
@@ -39,7 +39,8 @@ def load_metrics(log_dir):
 
 def plot_metrics(metrics):
     metrics['Epoch'] = metrics['Epoch'].astype(int)
-    fig, axes = plt.subplots(3, 2, figsize=(14, 12))
+    # ✅ ZMIANA: dopasowanie do rozmiaru strony A4 (portret)
+    fig, axes = plt.subplots(3, 2, figsize=(8.5, 11))
 
     axes[0, 0].plot(metrics['Epoch'], metrics['Train Accuracy'], 'o-', label='Train')
     axes[0, 0].plot(metrics['Epoch'], metrics['Val Accuracy'], 'o-', label='Val')
@@ -83,19 +84,22 @@ def plot_metrics(metrics):
     axes[2, 1].legend()
     axes[2, 1].grid(True)
 
-    plt.tight_layout()
+    # ✅ ZMIANA: lepsze dopasowanie layoutu w PDF
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
     return fig
 
 def plot_confusion_matrix(cm, labels):
     if cm is None:
         return None
-    fig, ax = plt.subplots(figsize=(4, 4))
+    # ✅ ZMIANA: większy, bardziej czytelny rozmiar
+    fig, ax = plt.subplots(figsize=(5, 5))
     sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False,
                 xticklabels=labels, yticklabels=labels, ax=ax)
     ax.set_xlabel("Predicted")
     ax.set_ylabel("True")
     ax.set_title("Confusion Matrix")
-    plt.tight_layout()
+    # ✅ ZMIANA: poprawione marginesy
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
     return fig
 
 def create_summary_page(metrics):
@@ -117,7 +121,8 @@ def create_summary_page(metrics):
     if last_epoch < metrics.shape[0]:
         lines.append("\n⛔ Early stopping aktywowany")
 
-    ax.text(0.05, 0.95, "\n".join(lines), fontsize=12, va='top', family='monospace')
+    # ✅ ZMIANA: zmniejszony font i margines
+    ax.text(0.07, 0.93, "\n".join(lines), fontsize=11, va='top', family='monospace')
     return fig
 
 def main():
@@ -130,7 +135,7 @@ def main():
 
     plt.show()
 
-    export = input("Wygenerowa\u0107 raport PDF z metrykami i confusion matrix? (T/N): ").strip().lower()
+    export = input("Wygenerować raport PDF z metrykami i confusion matrix? (T/N): ").strip().lower()
     if export in ('', 't', 'tak', 'y', 'yes'):
         project_root = Path(__file__).resolve().parent.parent.parent
         pdf_path = project_root / "results" / "logs" / log_dir / "training_report.pdf"
@@ -141,14 +146,24 @@ def main():
             if fig2: pdf.savefig(fig2)
 
             if augment_df is not None:
-                fig, ax = plt.subplots(figsize=(6, 4))
-                sns.heatmap(
-                    augment_df.pivot(index='Wiek', columns='Populacja', values='AugmentacjaZastosowana').fillna(0),
-                    annot=True, fmt=".0f", cmap="YlGnBu", cbar=False, ax=ax
-                )
-                ax.set_title("Zastosowanie augmentacji per klasa")
-                plt.tight_layout()
-                pdf.savefig(fig)
+                # 🔧 NOWA WIZUALIZACJA: oddzielne wykresy dla każdej populacji
+                for pop in sorted(augment_df["Populacja"].unique()):
+                    df_pop = augment_df[augment_df["Populacja"] == pop].sort_values("Wiek")
+                    wiek = df_pop["Wiek"].astype(str)
+                    original = df_pop["Łącznie"]
+                    augmented = df_pop["AugmentacjaZastosowana"]
+
+                    # ✅ ZMIANA: mniejszy rozmiar lepiej mieszczący się w PDF
+                    fig, ax = plt.subplots(figsize=(8.5, 4))
+                    ax.bar(wiek, original, label="Oryginalne", color="skyblue")
+                    ax.bar(wiek, augmented, bottom=original, label="Augmentacja", color="orange")
+                    ax.set_title(f"Populacja {pop} – wyrównanie klas wiekowych przez augmentację")
+                    ax.set_xlabel("Wiek")
+                    ax.set_ylabel("Liczba próbek")
+                    ax.legend()
+                    plt.tight_layout(rect=[0, 0, 1, 0.95])  # ✅ dopasowanie
+                    pdf.savefig(fig)
+                    plt.close(fig)  # ✅ Zamykanie figury
 
         print(f"📄 Raport zapisany do: {pdf_path}")
 
