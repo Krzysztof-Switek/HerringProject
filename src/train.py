@@ -32,7 +32,8 @@ class Trainer:
 
         self.writer = self._init_tensorboard(log_dir)
         self.log_dir = log_dir
-        self.best_f1 = 0.0
+        self.best_acc = 0.0  # ✅ DODANE: dla zapisu najlepszego modelu
+        self.early_stop_counter = 0  # ✅ DODANE: licznik do early stopping
         self.best_cm = None
         self.class_names = []
 
@@ -69,7 +70,6 @@ class Trainer:
 
         cfg = OmegaConf.load(config_path)
 
-        # 🔧 Ustawienie  ścieżek
         if not Path(cfg.data.metadata_file).is_absolute():
             cfg.data.metadata_file = str(self.project_root / cfg.data.metadata_file)
         if not Path(cfg.data.root_dir).is_absolute():
@@ -202,20 +202,28 @@ class Trainer:
 
             self._save_augment_summary()
 
-            if val_f1 > self.best_f1:
-                self.best_f1 = val_f1
+            # ✅ DODANE: zapis najlepszego modelu na podstawie ACC
+            if val_acc > self.best_acc:
+                self.best_acc = val_acc
                 self.best_cm = val_cm
-                model_path = checkpoint_dir / f"{model_name}_F1_{val_f1:.2f}.pth"
+                model_path = checkpoint_dir / f"{model_name}_ACC_{val_acc:.2f}.pth"
                 torch.save(self.model.state_dict(), model_path)
                 print(f"💾 Zapisano najlepszy model do: {model_path}")
+                self.early_stop_counter = 0
+            else:
+                self.early_stop_counter += 1
+                print(f"⚠️ Early stop counter: {self.early_stop_counter}")
+
+            # ✅ DODANE: warunek early stopping
+            if self.early_stop_counter >= self.cfg.training.early_stopping_patience:
+                print(f"🛑 Trening przerwany po {epoch + 1} epokach z powodu braku poprawy ACC")
+                break
 
             scheduler.step()
 
             if getattr(self.cfg.training, "stop_after_one_epoch", False):
-                if getattr(self.cfg.training, "stop_after_one_epoch", False):
-                    assert self.metrics_file.tell() > 0, "❌ training_metrics.csv jest pusty!"
-                    assert (self.log_dir / "augment_usage_summary.csv").exists(), "❌ augment_usage_summary.csv nie został zapisany!"
-
+                assert self.metrics_file.tell() > 0, "❌ training_metrics.csv jest pusty!"
+                assert (self.log_dir / "augment_usage_summary.csv").exists(), "❌ augment_usage_summary.csv nie został zapisany!"
                 print("🛑 Trening przerwany po jednej epoce – tryb testowy pipeline'u.")
                 break
 
