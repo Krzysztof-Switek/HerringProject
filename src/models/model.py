@@ -48,10 +48,11 @@ class HerringModel(nn.Module):
         # Initialize model
         model = getattr(models, self.cfg.base_model)(weights=weights)
 
-        # Freeze layers if needed (especially useful for transfer learning)
+        # (zamraża encoder, nie klasyfikator)
         if self.cfg.freeze_encoder:
-            for param in model.parameters():
-                param.requires_grad = False
+            for name, param in model.named_parameters():
+                if not any(c in name.lower() for c in ['fc', 'classifier', 'head']):
+                    param.requires_grad = False
 
         # Modify the classifier to match the number of classes
         dropout_p = getattr(self.cfg, "dropout_rate", 0.0)
