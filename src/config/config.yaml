@@ -5,10 +5,10 @@ data:
   val: "val"                                    # podkatalog walidacyjny
   test: "test"                                  # podkatalog testowy
   batch_size: 32
-  image_size: 224                               # rozmiar wejściowy dla modelu
+  image_size: 384                               # rozmiar wejściowy dla modelu
 
 model:
-  base_model: "resnet50"                        # image_size: 224
+  base_model: "regnet_y_32gf"                        # image_size: 224
   num_classes: 2
   pretrained: true
   freeze_encoder: false
@@ -20,12 +20,12 @@ model:
 #  base_model: "convnext_large"                 # image_size: 384       #
 #  base_model: "vit_h_14"                       # image_size: 384       #
 #  base_model: "resnet50"                        # image_size: 224      #
-#  base_model: "regnety_032"                    # image_size: 384       #
+#  base_model: "regnet_y_32gf"                    # image_size: 384     #
 #               "efficientnet_v2_l"               # image_size: 480                                                        #
 ######################### ALTERNATYWNE MODELE ###########################
 
 training:
-  stop_after_one_epoch: true
+  stop_after_one_epoch: false
   epochs: 150
   learning_rate: 0.00001
   device: "auto"
@@ -53,6 +53,6 @@ visualization:
   display_mode: 'matrix'
   matrix_cols: 3
   save_individual: False
-  target_layer: "base.layer4.2.conv3"           #resnet50:"base.layer4.2.conv3"; efficientnet:"base.features.8.0"
+  target_layer: "base.features.8.0"           #resnet50:"base.layer4.2.conv3"; efficientnet:"base.features.8.0"
   colormap: "jet"
   alpha: 0.5

@@ -20,7 +20,7 @@ class HerringModel(nn.Module):
             "convnext_large": {"image_size": 384, "classifier": "classifier"},
             "vit_h_14": {"image_size": 384, "classifier": "heads"},
             "efficientnet_v2_l": {"image_size": 480, "classifier": "classifier"},
-            "regnety_032": {"image_size": 384, "classifier": "head.fc"},
+            "regnet_y_32gf": {"image_size": 384, "classifier": "fc"},
         }
 
         if self.cfg.base_model not in model_config:
@@ -39,8 +39,8 @@ class HerringModel(nn.Module):
                 weights = models.ConvNeXt_Large_Weights.IMAGENET1K_V1
             elif self.cfg.base_model == "vit_h_14":
                 weights = models.ViT_H_14_Weights.IMAGENET1K_V1
-            elif self.cfg.base_model == "regnety_032":
-                weights = models.RegNetY_032_Weights.IMAGENET1K_V1
+            elif self.cfg.base_model == "regnet_y_32gf":
+                weights = models.RegNet_Y_32GF_Weights.IMAGENET1K_V1
             else:
                 warnings.warn(f"No weights enum for {self.cfg.base_model}, using default initialization")
                 weights = "DEFAULT"
