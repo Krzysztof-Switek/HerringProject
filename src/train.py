@@ -145,7 +145,9 @@ class Trainer:
                 inputs, targets = inputs.to(self.device), targets.to(self.device)
                 outputs = self.model(inputs)
                 loss = criterion(outputs, targets)
+                loss = loss.mean()
                 stats['loss'] += loss.item()
+
                 probs = torch.softmax(outputs, dim=1)[:, 1].cpu().numpy()
                 preds = outputs.argmax(dim=1).cpu().numpy()
                 targets_np = targets.cpu().numpy()
