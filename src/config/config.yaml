@@ -5,10 +5,10 @@ data:
   val: "val"                                    # podkatalog walidacyjny
   test: "test"                                  # podkatalog testowy
   batch_size: 32
-  image_size: 384                               # rozmiar wejściowy dla modelu
+  image_size: 224                               # rozmiar wejściowy dla modelu
 
 model:
-  base_model: "regnet_y_32gf"                        # image_size: 224
+  base_model: "resnet50"                        # image_size: 224
   num_classes: 2
   pretrained: true
   freeze_encoder: false
@@ -33,7 +33,7 @@ training:
   checkpoint_dir: "../../checkpoints"           # miejsce zapisu modelu
 
 prediction:
-  model_path: "checkpoints/resnet50_epoch_19_acc_83.48.pth"
+  model_path: "checkpoints/convnext_large_03-06/convnext_large_ACC_82.61.pth"
   image_path: "data/test/Głębia_Gdańska_0013_otsu_OBRYS_1.jpg"
   results_dir: "results/gradcam"
   show_visualization: true

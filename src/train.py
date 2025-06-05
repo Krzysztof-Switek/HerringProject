@@ -13,6 +13,26 @@ import numpy as np
 from datetime import datetime
 
 
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, input, target):
+        ce_loss = nn.functional.cross_entropy(input, target, weight=self.alpha, reduction='none')
+        pt = torch.exp(-ce_loss)
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
+
+
 class Trainer:
     def __init__(self, config_path: str = None):
         self.project_root = Path(__file__).parent.parent
@@ -31,8 +51,8 @@ class Trainer:
 
         self.writer = self._init_tensorboard(log_dir)
         self.log_dir = log_dir
-        self.best_acc = 0.0  # ✅ DODANE: dla zapisu najlepszego modelu
-        self.early_stop_counter = 0  # ✅ DODANE: licznik do early stopping
+        self.best_acc = 0.0
+        self.early_stop_counter = 0
         self.best_cm = None
         self.class_names = []
 
@@ -52,8 +72,7 @@ class Trainer:
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write("Populacja,Wiek,AugmentacjaZastosowana,Łącznie\n")
                 for (pop, wiek), total in sorted(self.data_loader.class_counts.items()):
-                    used = self.data_loader.augment_applied.get((pop, wiek), 0) if hasattr(self.data_loader,
-                                                                                           'augment_applied') else 0
+                    used = self.data_loader.augment_applied.get((pop, wiek), 0) if hasattr(self.data_loader, 'augment_applied') else 0
                     f.write(f"{pop},{wiek},{used},{total}\n")
             print(f"📈 Augmentacja per klasa zapisana do: {output_path}")
 
@@ -169,7 +188,9 @@ class Trainer:
         train_loader, val_loader, class_names = self.data_loader.get_loaders()
         self.class_names = class_names
 
-        criterion = nn.CrossEntropyLoss()
+        weights = torch.tensor([1.0, 1.0, 1.3, 1.5, 1.4, 1.6, 1.8, 2.0, 2.0, 2.0, 2.0], dtype=torch.float32).to(self.device)
+        criterion = FocalLoss(alpha=weights, gamma=2.0)
+
         optimizer = optim.AdamW(self.model.parameters(), lr=self.cfg.training.learning_rate,
                                 weight_decay=self.cfg.model.weight_decay)
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.cfg.training.epochs)
@@ -201,19 +222,17 @@ class Trainer:
 
             self._save_augment_summary()
 
-            # ✅ DODANE: zapis najlepszego modelu na podstawie ACC
             if val_acc > self.best_acc:
                 self.best_acc = val_acc
                 self.best_cm = val_cm
                 model_path = checkpoint_dir / f"{model_name}_ACC_{val_acc:.2f}.pth"
                 torch.save(self.model.state_dict(), model_path)
-                print(f"💾 Zapisano najlepszy model do: {model_path}")
+                print(f"📂 Zapisano najlepszy model do: {model_path}")
                 self.early_stop_counter = 0
             else:
                 self.early_stop_counter += 1
                 print(f"⚠️ Early stop counter: {self.early_stop_counter}")
 
-            # ✅ DODANE: warunek early stopping
             if self.early_stop_counter >= self.cfg.training.early_stopping_patience:
                 print(f"🛑 Trening przerwany po {epoch + 1} epokach z powodu braku poprawy ACC")
                 break
@@ -232,6 +251,7 @@ class Trainer:
 
         self._save_confusion_matrix()
         self._save_augment_summary()
+
 
 if __name__ == "__main__":
     try:
