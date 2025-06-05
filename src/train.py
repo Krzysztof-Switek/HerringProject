@@ -141,12 +141,10 @@ class Trainer:
         all_targets, all_preds, all_probs = [], [], []
 
         with torch.no_grad():
-            for inputs, targets, meta in val_loader:
+            for inputs, targets in val_loader:
                 inputs, targets = inputs.to(self.device), targets.to(self.device)
-                weights = get_sample_weights(meta['populacja'], meta['wiek']).to(self.device)
                 outputs = self.model(inputs)
-                loss = nn.functional.cross_entropy(outputs, targets, reduction='none')
-                loss = (loss * weights).mean()
+                loss = criterion(outputs, targets)
                 stats['loss'] += loss.item()
                 probs = torch.softmax(outputs, dim=1)[:, 1].cpu().numpy()
                 preds = outputs.argmax(dim=1).cpu().numpy()

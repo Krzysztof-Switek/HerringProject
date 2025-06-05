@@ -31,7 +31,7 @@ class AugmentWrapper(torch.utils.data.Dataset):
         if fname not in self.metadata:
             print(f"⚠️ Nie znaleziono metadanych dla pliku: {fname}")
             transform = self.transform_base
-            return transform(image), label
+            return transform(image), label, {"populacja": torch.tensor(-1), "wiek": torch.tensor(-1)}
 
         pop, wiek = self.metadata[fname]
         count = self.class_counts.get((pop, wiek), 0)
