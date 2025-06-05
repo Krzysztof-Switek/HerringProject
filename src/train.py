@@ -11,9 +11,9 @@ import csv
 import time
 import numpy as np
 from datetime import datetime
+import pandas as pd
 
 
-# ✅ DODANE: definicja ważonych wag dla klas wiekowych w populacji 2
 def get_sample_weights(populacje, wieki):
     weight_map = {
         (2, 3): 1.3,
@@ -99,6 +99,12 @@ class Trainer:
         values, counts = np.unique(targets, return_counts=True)
         class_dist = {int(v): int(c) for v, c in zip(values, counts)}
         return class_dist.get(0, 0), class_dist.get(1, 0)
+
+    def _save_augment_summary(self):
+        if hasattr(self.data_loader, "augment_usage"):
+            df = pd.DataFrame(self.data_loader.augment_usage)
+            df.to_csv(self.log_dir / "augment_usage_summary.csv", index=False)
+            print(f"\U0001f4c2 Zapisano podsumowanie augmentacji do: {self.log_dir / 'augment_usage_summary.csv'}")
 
     def _train_epoch(self, train_loader, optimizer, criterion):
         self.model.train()
@@ -241,5 +247,3 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error: {e}")
         raise
-
-    ##
