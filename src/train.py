@@ -13,24 +13,20 @@ import numpy as np
 from datetime import datetime
 
 
-class FocalLoss(nn.Module):
-    def __init__(self, alpha=None, gamma=2.0, reduction='mean'):
-        super(FocalLoss, self).__init__()
-        self.alpha = alpha
-        self.gamma = gamma
-        self.reduction = reduction
-
-    def forward(self, input, target):
-        ce_loss = nn.functional.cross_entropy(input, target, weight=self.alpha, reduction='none')
-        pt = torch.exp(-ce_loss)
-        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
-
-        if self.reduction == 'mean':
-            return focal_loss.mean()
-        elif self.reduction == 'sum':
-            return focal_loss.sum()
-        else:
-            return focal_loss
+# ✅ DODANE: definicja ważonych wag dla klas wiekowych w populacji 2
+def get_sample_weights(populacje, wieki):
+    weight_map = {
+        (2, 3): 1.3,
+        (2, 4): 1.5,
+        (2, 5): 1.6,
+        (2, 6): 1.8,
+        (2, 7): 2.0,
+        (2, 8): 2.0,
+        (2, 9): 2.0,
+        (2, 10): 2.0
+    }
+    weights = [weight_map.get((int(p), int(w)), 1.0) for p, w in zip(populacje, wieki)]
+    return torch.tensor(weights, dtype=torch.float32)
 
 
 class Trainer:
@@ -65,22 +61,6 @@ class Trainer:
             'Val Loss', 'Val Accuracy', 'Val Precision', 'Val Recall', 'Val F1', 'Val AUC',
             'Train Time (s)'
         ])
-
-    def _save_augment_summary(self):
-        if hasattr(self.data_loader, 'class_counts'):
-            output_path = self.log_dir / "augment_usage_summary.csv"
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write("Populacja,Wiek,AugmentacjaZastosowana,Łącznie\n")
-                for (pop, wiek), total in sorted(self.data_loader.class_counts.items()):
-                    used = self.data_loader.augment_applied.get((pop, wiek), 0) if hasattr(self.data_loader, 'augment_applied') else 0
-                    f.write(f"{pop},{wiek},{used},{total}\n")
-            print(f"📈 Augmentacja per klasa zapisana do: {output_path}")
-
-    def _save_confusion_matrix(self):
-        if self.best_cm is not None and self.class_names:
-            cm_path = self.log_dir / "confusion_matrix_best_model.npz"
-            np.savez(cm_path, matrix=self.best_cm, labels=np.array(self.class_names))
-            print(f"📊 Confusion matrix with labels saved to: {cm_path}")
 
     def _load_config(self, config_path: str = None):
         if config_path is None:
@@ -125,11 +105,13 @@ class Trainer:
         stats = {'loss': 0.0, 'correct': 0, 'total': 0}
         all_targets, all_preds, all_probs = [], [], []
 
-        for inputs, targets in train_loader:
+        for inputs, targets, meta in train_loader:
             inputs, targets = inputs.to(self.device), targets.to(self.device)
+            weights = get_sample_weights(meta['populacja'], meta['wiek']).to(self.device)
             optimizer.zero_grad()
             outputs = self.model(inputs)
-            loss = criterion(outputs, targets)
+            loss = nn.functional.cross_entropy(outputs, targets, reduction='none')
+            loss = (loss * weights).mean()
             loss.backward()
             optimizer.step()
 
@@ -159,10 +141,12 @@ class Trainer:
         all_targets, all_preds, all_probs = [], [], []
 
         with torch.no_grad():
-            for inputs, targets in val_loader:
+            for inputs, targets, meta in val_loader:
                 inputs, targets = inputs.to(self.device), targets.to(self.device)
+                weights = get_sample_weights(meta['populacja'], meta['wiek']).to(self.device)
                 outputs = self.model(inputs)
-                loss = criterion(outputs, targets)
+                loss = nn.functional.cross_entropy(outputs, targets, reduction='none')
+                loss = (loss * weights).mean()
                 stats['loss'] += loss.item()
                 probs = torch.softmax(outputs, dim=1)[:, 1].cpu().numpy()
                 preds = outputs.argmax(dim=1).cpu().numpy()
@@ -188,9 +172,7 @@ class Trainer:
         train_loader, val_loader, class_names = self.data_loader.get_loaders()
         self.class_names = class_names
 
-        weights = torch.tensor([1.0, 1.0, 1.3, 1.5, 1.4, 1.6, 1.8, 2.0, 2.0, 2.0, 2.0], dtype=torch.float32).to(self.device)
-        criterion = FocalLoss(alpha=weights, gamma=2.0)
-
+        criterion = nn.CrossEntropyLoss(reduction='none')
         optimizer = optim.AdamW(self.model.parameters(), lr=self.cfg.training.learning_rate,
                                 weight_decay=self.cfg.model.weight_decay)
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.cfg.training.epochs)
@@ -227,22 +209,22 @@ class Trainer:
                 self.best_cm = val_cm
                 model_path = checkpoint_dir / f"{model_name}_ACC_{val_acc:.2f}.pth"
                 torch.save(self.model.state_dict(), model_path)
-                print(f"📂 Zapisano najlepszy model do: {model_path}")
+                print(f"\U0001f4be Zapisano najlepszy model do: {model_path}")
                 self.early_stop_counter = 0
             else:
                 self.early_stop_counter += 1
-                print(f"⚠️ Early stop counter: {self.early_stop_counter}")
+                print(f"\u26a0\ufe0f Early stop counter: {self.early_stop_counter}")
 
             if self.early_stop_counter >= self.cfg.training.early_stopping_patience:
-                print(f"🛑 Trening przerwany po {epoch + 1} epokach z powodu braku poprawy ACC")
+                print(f"\U0001f6d1 Trening przerwany po {epoch + 1} epokach z powodu braku poprawy ACC")
                 break
 
             scheduler.step()
 
             if getattr(self.cfg.training, "stop_after_one_epoch", False):
-                assert self.metrics_file.tell() > 0, "❌ training_metrics.csv jest pusty!"
-                assert (self.log_dir / "augment_usage_summary.csv").exists(), "❌ augment_usage_summary.csv nie został zapisany!"
-                print("🛑 Trening przerwany po jednej epoce – tryb testowy pipeline'u.")
+                assert self.metrics_file.tell() > 0, "\u274c training_metrics.csv jest pusty!"
+                assert (self.log_dir / "augment_usage_summary.csv").exists(), "\u274c augment_usage_summary.csv nie został zapisany!"
+                print("\U0001f6d1 Trening przerwany po jednej epoce – tryb testowy pipeline'u.")
                 break
 
         self.metrics_file.close()
@@ -251,7 +233,6 @@ class Trainer:
 
         self._save_confusion_matrix()
         self._save_augment_summary()
-
 
 if __name__ == "__main__":
     try:

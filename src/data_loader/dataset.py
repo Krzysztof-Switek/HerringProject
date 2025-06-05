@@ -52,7 +52,8 @@ class AugmentWrapper(torch.utils.data.Dataset):
         else:
             transform = self.transform_base
 
-        return transform(image), label
+        return transform(image), label, {"populacja": torch.tensor(pop), "wiek": torch.tensor(wiek)}
+
 
 
 class HerringDataset:
