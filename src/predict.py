@@ -42,7 +42,7 @@ def run_full_dataset_prediction():
 
     # Lista folderów ze zdjęciami
     data_root = Path(cfg.data.root_dir)
-    folders = ["train/0", "train/1", "val/0", "val/1", "test/0", "test/1"]
+    folders = ["train/1", "train/2", "val/1", "val/2", "test/1", "test/2"]
     all_image_paths = []
     for folder in folders:
         folder_path = data_root / folder
@@ -64,8 +64,8 @@ def run_full_dataset_prediction():
             with torch.no_grad():
                 output = model(input_tensor)
                 probs = F.softmax(output, dim=1)[0]
-                pred_class = output.argmax().item()
-                confidence = float(probs[pred_class]) * 100
+                pred_class = output.argmax().item() +1
+                confidence = float(probs[pred_class -1]) * 100
             key = image_path.name.lower()
             predictions[key] = (pred_class, round(confidence, 2))
         except Exception as e:
@@ -81,8 +81,8 @@ def run_full_dataset_prediction():
     pred_probs = []
     not_found = []
 
-    for path in df["FilePath"]:
-        file_name = Path(path).name.lower()
+    for file_name in df["FileName"]:
+        file_name = str(file_name).lower()
         pred = predictions.get(file_name, (None, None))
         if pred[0] is None:
             not_found.append(file_name)
