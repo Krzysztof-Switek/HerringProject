@@ -1,5 +1,4 @@
 import torch
-import torch.nn as nn
 import torch.optim as optim
 from pathlib import Path
 from omegaconf import OmegaConf
@@ -11,6 +10,8 @@ import time
 import numpy as np
 from datetime import datetime
 from engine.train_loop import train_epoch, validate
+from engine.loss_utils import LossFactory
+
 
 class Trainer:
     def __init__(self, config_path: str = None, project_root: Path = None):
@@ -104,71 +105,83 @@ class Trainer:
         train_loader, val_loader, class_names = self.data_loader.get_loaders()
         self.class_names = class_names
 
-        criterion = nn.CrossEntropyLoss(reduction='none')
-        optimizer = optim.AdamW(self.model.parameters(), lr=self.cfg.training.learning_rate,
-                                weight_decay=self.cfg.model.weight_decay)
-        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.cfg.training.epochs)
-
         model_name = self.cfg.model.base_model
-        checkpoint_dir = self.project_root / "checkpoints" / f"{model_name}_{datetime.now().strftime('%d-%m')}"
-        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_root = self.project_root / "checkpoints"
 
-        for epoch in range(self.cfg.training.epochs):
-            start_time = time.time()
-            train_loss, train_acc, train_prec, train_rec, train_f1, train_auc, train_targets = train_epoch(
-                self.model, self.device, train_loader, optimizer, criterion
-            )
-            val_loss, val_acc, val_prec, val_rec, val_f1, val_auc, val_cm, val_targets = validate(
-                self.model, self.device, val_loader, criterion
-            )
-            epoch_time = time.time() - start_time
+        for loss_name in self.cfg.training.loss_type:
+            print(f"\n🎯 Start treningu z funkcją straty: {loss_name}")
+            loss_factory = LossFactory(loss_name)
+            criterion = loss_factory.get()
 
-            train_c0, train_c1 = self._get_class_distribution(train_targets)
-            val_samples = len(val_targets)
-            train_samples = len(train_targets)
+            # Nowy model i optimizer dla każdej funkcji straty
+            self.model = HerringModel(self.cfg).to(self.device)
+            optimizer = optim.AdamW(self.model.parameters(), lr=self.cfg.training.learning_rate,
+                                    weight_decay=self.cfg.model.weight_decay)
+            scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.cfg.training.epochs)
 
-            print(f"\nEpoch {epoch + 1}/{self.cfg.training.epochs}:")
-            print(
-                f"Train - Loss: {train_loss:.4f}, Acc: {train_acc:.2f}%, Precision: {train_prec:.2f}, Recall: {train_rec:.2f}, F1: {train_f1:.2f}, AUC: {train_auc:.2f}")
-            print(
-                f"Val   - Loss: {val_loss:.4f}, Acc: {val_acc:.2f}%, Precision: {val_prec:.2f}, Recall: {val_rec:.2f}, F1: {val_f1:.2f}, AUC: {val_auc:.2f}")
-            print(f"Train class dist: 0: {train_c0}, 1: {train_c1}, Time: {epoch_time:.1f}s")
+            timestamp = datetime.now().strftime('%d-%m_%H-%M')
+            checkpoint_dir = checkpoint_root / f"{model_name}_{loss_name}_{timestamp}"
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-            self.metrics_writer.writerow([
-                epoch + 1, train_samples, val_samples, train_c0, train_c1,
-                train_loss, train_acc, train_prec, train_rec, train_f1, train_auc,
-                val_loss, val_acc, val_prec, val_rec, val_f1, val_auc, round(epoch_time, 2)
-            ])
+            for epoch in range(self.cfg.training.epochs):
+                start_time = time.time()
+                train_loss, train_acc, train_prec, train_rec, train_f1, train_auc, train_targets = train_epoch(
+                    self.model, self.device, train_loader, optimizer, criterion
+                )
+                val_loss, val_acc, val_prec, val_rec, val_f1, val_auc, val_cm, val_targets = validate(
+                    self.model, self.device, val_loader, criterion
+                )
+                epoch_time = time.time() - start_time
 
+                train_c0, train_c1 = self._get_class_distribution(train_targets)
+                val_samples = len(val_targets)
+                train_samples = len(train_targets)
+
+                print(f"\nEpoch {epoch + 1}/{self.cfg.training.epochs} ({loss_name}):")
+                print(
+                    f"Train - Loss: {train_loss:.4f}, Acc: {train_acc:.2f}%, Precision: {train_prec:.2f}, Recall: {train_rec:.2f}, F1: {train_f1:.2f}, AUC: {train_auc:.2f}")
+                print(
+                    f"Val   - Loss: {val_loss:.4f}, Acc: {val_acc:.2f}%, Precision: {val_prec:.2f}, Recall: {val_rec:.2f}, F1: {val_f1:.2f}, AUC: {val_auc:.2f}")
+                print(f"Train class dist: 0: {train_c0}, 1: {train_c1}, Time: {epoch_time:.1f}s")
+
+                self.metrics_writer.writerow([
+                    f"{loss_name}-e{epoch + 1}", train_samples, val_samples, train_c0, train_c1,
+                    train_loss, train_acc, train_prec, train_rec, train_f1, train_auc,
+                    val_loss, val_acc, val_prec, val_rec, val_f1, val_auc, round(epoch_time, 2)
+                ])
+
+                self._save_augment_summary()
+
+                if val_acc > self.best_acc:
+                    self.best_acc = val_acc
+                    self.best_cm = val_cm
+                    model_path = checkpoint_dir / f"{model_name}_{loss_name}_ACC_{val_acc:.2f}.pth"
+                    torch.save(self.model.state_dict(), model_path)
+                    print(f"\U0001f4be Zapisano najlepszy model do: {model_path}")
+                    self.early_stop_counter = 0
+                else:
+                    self.early_stop_counter += 1
+                    print(f"\u26a0\ufe0f Early stop counter: {self.early_stop_counter}")
+
+                if self.early_stop_counter >= self.cfg.training.early_stopping_patience:
+                    print(
+                        f"\U0001f6d1 Trening ({loss_name}) przerwany po {epoch + 1} epokach z powodu braku poprawy ACC")
+                    break
+
+                scheduler.step()
+
+                if getattr(self.cfg.training, "stop_after_one_epoch", False):
+                    assert self.metrics_file.tell() > 0, "\u274c training_metrics.csv jest pusty!"
+                    assert (
+                                self.log_dir / "augment_usage_summary.csv").exists(), "\u274c augment_usage_summary.csv nie został zapisany!"
+                    print("\U0001f6d1 Trening przerwany po jednej epoce – tryb testowy pipeline'u.")
+                    break
+
+            self._save_confusion_matrix()
             self._save_augment_summary()
-
-            if val_acc > self.best_acc:
-                self.best_acc = val_acc
-                self.best_cm = val_cm
-                model_path = checkpoint_dir / f"{model_name}_ACC_{val_acc:.2f}.pth"
-                torch.save(self.model.state_dict(), model_path)
-                print(f"\U0001f4be Zapisano najlepszy model do: {model_path}")
-                self.early_stop_counter = 0
-            else:
-                self.early_stop_counter += 1
-                print(f"\u26a0\ufe0f Early stop counter: {self.early_stop_counter}")
-
-            if self.early_stop_counter >= self.cfg.training.early_stopping_patience:
-                print(f"\U0001f6d1 Trening przerwany po {epoch + 1} epokach z powodu braku poprawy ACC")
-                break
-
-            scheduler.step()
-
-            if getattr(self.cfg.training, "stop_after_one_epoch", False):
-                assert self.metrics_file.tell() > 0, "\u274c training_metrics.csv jest pusty!"
-                assert (
-                            self.log_dir / "augment_usage_summary.csv").exists(), "\u274c augment_usage_summary.csv nie został zapisany!"
-                print("\U0001f6d1 Trening przerwany po jednej epoce – tryb testowy pipeline'u.")
-                break
 
         self.metrics_file.close()
         if self.writer:
             self.writer.close()
 
-        self._save_confusion_matrix()
-        self._save_augment_summary()
+

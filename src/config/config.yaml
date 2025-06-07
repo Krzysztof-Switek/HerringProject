@@ -25,6 +25,7 @@ model:
 ######################### ALTERNATYWNE MODELE ###########################
 
 training:
+  loss_type: [sample_weighted_ce]
   stop_after_one_epoch: false
   epochs: 150
   learning_rate: 0.00001

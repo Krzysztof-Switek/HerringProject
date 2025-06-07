@@ -1,20 +1,18 @@
 import torch
 import torch.nn as nn
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
-from engine.loss_utils import get_sample_weights
+from engine.loss_utils import LossFactory
 
-def train_epoch(model, device, train_loader, optimizer, criterion):
+def train_epoch(model, device, train_loader, optimizer, loss_fn):
     model.train()
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
     all_targets, all_preds, all_probs = [], [], []
 
     for inputs, targets, meta in train_loader:
         inputs, targets = inputs.to(device), targets.to(device)
-        weights = get_sample_weights(meta['populacja'], meta['wiek']).to(device)
         optimizer.zero_grad()
         outputs = model(inputs)
-        loss = nn.functional.cross_entropy(outputs, targets, reduction='none')
-        loss = (loss * weights).mean()
+        loss = loss_fn(outputs, targets, meta)
         loss.backward()
         optimizer.step()
 
@@ -38,17 +36,23 @@ def train_epoch(model, device, train_loader, optimizer, criterion):
 
     return loss, acc, precision, recall, f1, auc, all_targets
 
-def validate(model, device, val_loader, criterion):
+
+def validate(model, device, val_loader, loss_fn):
     model.eval()
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
     all_targets, all_preds, all_probs = [], [], []
 
     with torch.no_grad():
-        for inputs, targets in val_loader:
+        for batch in val_loader:
+            if len(batch) == 3:
+                inputs, targets, meta = batch
+            else:
+                inputs, targets = batch
+                meta = None
+
             inputs, targets = inputs.to(device), targets.to(device)
             outputs = model(inputs)
-            loss = criterion(outputs, targets)
-            loss = loss.mean()
+            loss = loss_fn(outputs, targets, meta)
             stats['loss'] += loss.item()
 
             probs = torch.softmax(outputs, dim=1)[:, 1].cpu().numpy()
@@ -67,6 +71,6 @@ def validate(model, device, val_loader, criterion):
     recall = recall_score(all_targets, all_preds)
     f1 = f1_score(all_targets, all_preds)
     auc = roc_auc_score(all_targets, all_probs)
-
     cm = confusion_matrix(all_targets, all_preds)
+
     return loss, acc, precision, recall, f1, auc, cm, all_targets
