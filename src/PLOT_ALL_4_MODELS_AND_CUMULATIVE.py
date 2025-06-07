@@ -21,9 +21,9 @@ model_to_column_map = {
         "pred": "convnext_large_pred",
         "prob": "convnext_large_probability"
     },
-    "PRED_KUMULACYJNE": {
-        "pred": "PRED_KUMULACYJNE",
-        "prob": None
+    "resnet50_new": {
+        "pred": "resnet50_pred_new",
+        "prob": "resnet50_probability_new"
     }
 }
 

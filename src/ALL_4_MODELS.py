@@ -29,7 +29,9 @@ def main():
         "convnext_large_pred", "convnext_large_probability",
         "efficientnet_v2_l_pred", "efficientnet_v2_l_probability",
         "regnet_y_32gf_pred", "regnet_y_32gf_probability",
-        "resnet50_pred", "resnet50_probability"
+        "resnet50_pred", "resnet50_probability",
+        "resnet50_pred_new", "resnet50_probability_new"
+
     ]
     pred_columns = [col for col in model_columns if col.endswith("_pred")]
 

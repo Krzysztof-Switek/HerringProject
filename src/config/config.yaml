@@ -1,5 +1,5 @@
 data:
-  metadata_file: "src/data_loader/AnalysisWithOtolithPhoto_with_sets.xlsx"
+  metadata_file: "data_loader/AnalysisWithOtolithPhoto_with_sets.xlsx"
   root_dir: "data"                        # główny katalog danych
   train: "train"                                # podkatalog treningowy
   val: "val"                                    # podkatalog walidacyjny
