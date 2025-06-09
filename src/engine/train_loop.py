@@ -1,7 +1,5 @@
 import torch
-import torch.nn as nn
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
-from engine.loss_utils import LossFactory
 
 def train_epoch(model, device, train_loader, optimizer, loss_fn):
     model.train()

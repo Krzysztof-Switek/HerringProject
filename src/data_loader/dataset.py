@@ -167,7 +167,7 @@ class HerringDataset:
             train_set,
             batch_size=self.cfg.batch_size,
             shuffle=True,
-            num_workers=0,  # 👈 zmiana z 2 na 0 dla bezpieczeństwa serializacji
+            num_workers=0,
             pin_memory=torch.cuda.is_available()
         )
 
@@ -175,7 +175,7 @@ class HerringDataset:
             val_set,
             batch_size=self.cfg.batch_size,
             shuffle=False,
-            num_workers=0,  # 👈 zmiana z 2 na 0
+            num_workers=0,
             pin_memory=torch.cuda.is_available()
         )
 
