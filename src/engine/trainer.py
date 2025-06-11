@@ -11,7 +11,9 @@ import numpy as np
 from datetime import datetime
 from engine.train_loop import train_epoch, validate
 from engine.loss_utils import LossFactory
+from engine.predict_after_training import run_full_dataset_prediction
 import pandas as pd
+from utils.path_manager import PathManager
 
 
 class Trainer:
@@ -19,6 +21,7 @@ class Trainer:
         self.project_root = project_root or Path(__file__).parent.parent
         print(f"\nProject root: {self.project_root}")
         self.cfg = self._load_config(config_path)
+        self.path_manager = PathManager(self.project_root, self.cfg)
         self.device = self._init_device()
         print(f"Using device: {self.device}")
         self._validate_data_structure()
@@ -49,17 +52,9 @@ class Trainer:
 
     def _load_config(self, config_path: str = None):
         if config_path is None:
-            config_path = self.project_root /"src" / "config" / "config.yaml"
+            config_path = self.project_root / "src" / "config" / "config.yaml"
 
         cfg = OmegaConf.load(config_path)
-
-        if not Path(cfg.data.metadata_file).is_absolute():
-            cfg.data.metadata_file = str(self.project_root / "src" / cfg.data.metadata_file)
-        if not Path(cfg.data.root_dir).is_absolute():
-            cfg.data.root_dir = str(self.project_root / cfg.data.root_dir)
-        if not Path(cfg.training.checkpoint_dir).is_absolute():
-            cfg.training.checkpoint_dir = str(self.project_root / cfg.training.checkpoint_dir)
-
         return cfg
 
     def _init_device(self):
@@ -68,9 +63,11 @@ class Trainer:
     def _validate_data_structure(self):
         print("\nValidating data structure...")
         for split in ["train", "val"]:
-            split_path = Path(self.cfg.data.root_dir) / split
+            split_path = self.path_manager.data_root() / split
             if not split_path.exists():
                 raise FileNotFoundError(f"Missing directory: {split_path}")
+            if not any(split_path.iterdir()):
+                raise RuntimeError(f"Katalog {split_path} istnieje, ale jest pusty")
         print("Data structure validated.")
 
     def _init_tensorboard(self, log_dir):
@@ -90,23 +87,18 @@ class Trainer:
         self.class_names = class_names
 
         model_name = self.cfg.model.base_model
-        checkpoint_root = self.project_root / "checkpoints"
+        checkpoint_root = Path(self.cfg.training.checkpoint_dir)
         logs_root = self.project_root / "results" / "logs"
 
-        # Automatyczne zliczanie klas wiekowych dla LDAM
         df = pd.read_excel(self.cfg.data.metadata_file)
-        df["SET"] = df["SET"].astype(str).str.upper()
-        df_train = df[df["SET"] == "TRAIN"]
+        df_train = df[df["SET"].str.lower() == "train"]
         age_counts = df_train["Wiek"].value_counts().sort_index().to_dict()
         class_counts = [age_counts.get(age, 0) for age in sorted(age_counts)]
 
         for loss_name in self.cfg.training.loss_type:
             print(f"\n🎯 Start treningu z funkcją straty: {loss_name}")
 
-            if loss_name == "ldam":
-                loss_factory = LossFactory(loss_name, class_counts=class_counts)
-            else:
-                loss_factory = LossFactory(loss_name)
+            loss_factory = LossFactory(loss_name, class_counts=class_counts if loss_name == "ldam" else None)
             criterion = loss_factory.get()
 
             self.model = HerringModel(self.cfg).to(self.device)
@@ -166,22 +158,29 @@ class Trainer:
                     self.best_cm = val_cm
                     model_path = checkpoint_dir / f"{model_name}_{loss_name}_ACC_{val_acc:.2f}.pth"
                     torch.save(self.model.state_dict(), model_path)
-                    print(f"\U0001f4be Zapisano najlepszy model do: {model_path}")
+                    print(f"💾 Zapisano najlepszy model do: {model_path}")
                     self.early_stop_counter = 0
                 else:
                     self.early_stop_counter += 1
-                    print(f"\u26a0\ufe0f Early stop counter: {self.early_stop_counter}")
+                    print(f"⚠️ Early stop counter: {self.early_stop_counter}")
 
                 if self.early_stop_counter >= self.cfg.training.early_stopping_patience:
-                    print(f"\U0001f6d1 Trening ({loss_name}) przerwany po {epoch + 1} epokach z powodu braku poprawy ACC")
+                    print(f"🚝 Trening ({loss_name}) przerwany po {epoch + 1} epokach z powodu braku poprawy ACC")
                     break
 
                 scheduler.step()
 
                 if getattr(self.cfg.training, "stop_after_one_epoch", False):
-                    print("\U0001f6d1 Trening przerwany po jednej epoce – tryb testowy pipeline'u.")
+                    print("🚝 Trening przerwany po jednej epoce – tryb testowy pipeline'u.")
                     break
 
             self.metrics_file.close()
             if self.writer:
                 self.writer.close()
+
+            print(f"🔍 Uruchamianie predykcji dla {loss_name} na całym zbiorze...")
+            run_full_dataset_prediction(
+                loss_name=loss_name,
+                model_path=str(model_path),
+                path_manager=self.path_manager
+            )

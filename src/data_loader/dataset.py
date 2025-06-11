@@ -6,6 +6,8 @@ from torch.utils.data import DataLoader
 from collections import Counter, defaultdict
 from omegaconf import DictConfig
 from pathlib import Path
+from utils.path_manager import PathManager  # 🔄 [ZMIANA 1] importujemy PathManager
+
 
 class AugmentWrapper(torch.utils.data.Dataset):
     def __init__(self, base_dataset, metadata, class_counts, max_count, transform_base, transform_strong, augment_applied):
@@ -24,10 +26,8 @@ class AugmentWrapper(torch.utils.data.Dataset):
         path, label = self.base_dataset.samples[index]
         image = self.base_dataset.loader(path)
 
-        # 🔧 DODANE: lepsza normalizacja nazwy pliku
         fname = os.path.basename(path).strip().replace(" ", "_").lower()
 
-        # 🔍 DODANE: test obecności w metadanych
         if fname not in self.metadata:
             print(f"⚠️ Nie znaleziono metadanych dla pliku: {fname}")
             transform = self.transform_base
@@ -36,18 +36,14 @@ class AugmentWrapper(torch.utils.data.Dataset):
         pop, wiek = self.metadata[fname]
         count = self.class_counts.get((pop, wiek), 0)
 
-        # 🔧 DODANE: bezpieczne minimum count
         desired_total = self.max_count
         augment_needed = max(0, desired_total - count)
         prob = min(1.0, augment_needed / desired_total)
 
-        #prob = 0.5                                                  # 🔧 TEST: stałe prawdopodobieństwo augmentacji
-
         if torch.rand(1).item() < prob:
             self.augment_applied[(pop, wiek)] += 1
             transform = self.transform_strong
-            # 🔍 logowanie augmentacji
-            if self.augment_applied[(pop, wiek)] < 5:  # ogranicz do kilku logów
+            if self.augment_applied[(pop, wiek)] < 5:
                 print(f"✨ Augmentacja dla ({pop}, {wiek}) - count: {count}, prob: {prob:.2f}")
         else:
             transform = self.transform_base
@@ -55,11 +51,11 @@ class AugmentWrapper(torch.utils.data.Dataset):
         return transform(image), label, {"populacja": torch.tensor(pop), "wiek": torch.tensor(wiek)}
 
 
-
 class HerringDataset:
     def __init__(self, config: DictConfig):
-        self.cfg = config.data
-        self._validate_paths()
+        self.cfg = config
+        self.path_manager = PathManager(Path(__file__).parent.parent.parent, config)  # 🔄 [ZMIANA 2]
+
         self.train_transform_base = self._get_base_transforms()
         self.train_transform_strong = self._get_strong_transforms()
         self.val_transform = self._get_val_transforms()
@@ -72,7 +68,7 @@ class HerringDataset:
         self._validate_labels()
 
     def _load_metadata(self):
-        excel_path = Path(self.cfg.metadata_file)
+        excel_path = self.path_manager.metadata_file()  # 🔄 [ZMIANA 3]
         if not excel_path.exists():
             raise FileNotFoundError(f"Nie znaleziono pliku Excel: {excel_path}")
 
@@ -97,7 +93,7 @@ class HerringDataset:
 
     def _get_base_transforms(self):
         return transforms.Compose([
-            transforms.Resize((self.cfg.image_size, self.cfg.image_size)),
+            transforms.Resize((self.cfg.data.image_size, self.cfg.data.image_size)),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
@@ -105,12 +101,12 @@ class HerringDataset:
     def _get_strong_transforms(self):
         return transforms.Compose([
             transforms.RandomRotation(30),
-            transforms.RandomResizedCrop(self.cfg.image_size, scale=(0.8, 1.0)),
+            transforms.RandomResizedCrop(self.cfg.data.image_size, scale=(0.8, 1.0)),
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomVerticalFlip(p=0.5),
             transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
             transforms.RandomAffine(degrees=15, translate=(0.1, 0.1), scale=(0.9, 1.1), shear=10),
-            transforms.Resize((self.cfg.image_size, self.cfg.image_size)),
+            transforms.Resize((self.cfg.data.image_size, self.cfg.data.image_size)),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             transforms.GaussianBlur(kernel_size=3)
@@ -118,40 +114,28 @@ class HerringDataset:
 
     def _get_val_transforms(self):
         return transforms.Compose([
-            transforms.Resize(self.cfg.image_size),
-            transforms.CenterCrop(self.cfg.image_size),
+            transforms.Resize(self.cfg.data.image_size),
+            transforms.CenterCrop(self.cfg.data.image_size),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
 
-    def _validate_paths(self):
-        base_path = os.path.join(os.path.dirname(__file__), '../../..', self.cfg.root_dir)
-        required_paths = {
-            'train': os.path.join(base_path, 'train'),
-            'val': os.path.join(base_path, 'val')
-        }
-        for name, path in required_paths.items():
-            if not os.path.exists(path):
-                raise FileNotFoundError(f"Brak katalogu {name}: {path}")
-            if not os.listdir(path):
-                raise RuntimeError(f"Katalog {name} jest pusty: {path}")
-
     def _validate_labels(self):
-        base_path = os.path.join(os.path.dirname(__file__), '../../..', self.cfg.root_dir)
-        train_labels = sorted(os.listdir(os.path.join(base_path, 'train')))
-        val_labels = sorted(os.listdir(os.path.join(base_path, 'val')))
+        data_root = self.path_manager.data_root()  # 🔄 [ZMIANA 4]
+        train_labels = sorted(os.listdir(data_root / 'train'))
+        val_labels = sorted(os.listdir(data_root / 'val'))
         expected_labels = ['1', '2']
         if train_labels != expected_labels or val_labels != expected_labels:
             raise ValueError(f"Niepoprawne etykiety: {train_labels}, {val_labels}")
         print("✔️ Etykiety klas poprawne (1 i 2)")
 
     def get_loaders(self):
-        base_path = os.path.join(os.path.dirname(__file__), '../../..')
-        train_dir = os.path.join(base_path, self.cfg.root_dir, 'train')
-        val_dir = os.path.join(base_path, self.cfg.root_dir, 'val')
+        data_root = self.path_manager.data_root()  # 🔄 [ZMIANA 5]
+        train_dir = data_root / 'train'
+        val_dir = data_root / 'val'
 
-        train_base = datasets.ImageFolder(train_dir)
-        val_set = datasets.ImageFolder(val_dir, transform=self.val_transform)
+        train_base = datasets.ImageFolder(str(train_dir))
+        val_set = datasets.ImageFolder(str(val_dir), transform=self.val_transform)
 
         train_set = AugmentWrapper(
             base_dataset=train_base,
@@ -165,7 +149,7 @@ class HerringDataset:
 
         train_loader = DataLoader(
             train_set,
-            batch_size=self.cfg.batch_size,
+            batch_size=self.cfg.data.batch_size,
             shuffle=True,
             num_workers=0,
             pin_memory=torch.cuda.is_available()
@@ -173,12 +157,10 @@ class HerringDataset:
 
         val_loader = DataLoader(
             val_set,
-            batch_size=self.cfg.batch_size,
+            batch_size=self.cfg.data.batch_size,
             shuffle=False,
             num_workers=0,
             pin_memory=torch.cuda.is_available()
         )
 
         return train_loader, val_loader, train_base.classes
-
-    ###

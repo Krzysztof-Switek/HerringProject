@@ -1,6 +1,6 @@
 data:
   metadata_file: "data_loader/AnalysisWithOtolithPhoto_with_sets.xlsx"
-  root_dir: "data"                        # główny katalog danych
+  root_dir: "data"                              # główny katalog danych
   train: "train"                                # podkatalog treningowy
   val: "val"                                    # podkatalog walidacyjny
   test: "test"                                  # podkatalog testowy
@@ -25,7 +25,7 @@ model:
 ######################### ALTERNATYWNE MODELE ###########################
 
 training:
-  loss_type: [standard_ce, sample_weighted_ce, weighted_age_ce, focal_loss_ageboost, ldam]
+  loss_type: [standard_ce, ldam] # sample_weighted_ce, weighted_age_ce, focal_loss_ageboost,
   stop_after_one_epoch: true
   epochs: 150
   learning_rate: 0.00001

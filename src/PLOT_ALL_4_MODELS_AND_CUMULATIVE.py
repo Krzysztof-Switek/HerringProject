@@ -13,9 +13,9 @@ model_to_column_map = {
         "pred": "resnet50_pred",
         "prob": "resnet50_probability"
     },
-    "regnet_y_32gf": {
-        "pred": "regnet_y_32gf_pred",
-        "prob": "regnet_y_32gf_probability"
+    "resnet50_pred_rev": {
+        "pred": "resnet50_pred_rev",
+        "prob": "resnet50_probability_rev"
     },
     "convnext_large": {
         "pred": "convnext_large_pred",
