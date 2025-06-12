@@ -6,7 +6,7 @@ class PathManager:
         self.cfg = cfg
 
     def config_path(self) -> Path:
-        return self.project_root / "config" / "config.yaml"
+        return self.project_root / "src" / "config" / "config.yaml"
 
     def metadata_file(self) -> Path:
         return self._resolve(self.cfg.data.metadata_file, subdir="src")

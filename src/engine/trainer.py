@@ -52,10 +52,9 @@ class Trainer:
 
     def _load_config(self, config_path: str = None):
         if config_path is None:
-            config_path = self.project_root / "src" / "config" / "config.yaml"
-
-        cfg = OmegaConf.load(config_path)
-        return cfg
+            temp_path_manager = PathManager(self.project_root, cfg=None)
+            config_path = temp_path_manager.config_path()
+        return OmegaConf.load(config_path)
 
     def _init_device(self):
         return torch.device("cuda" if torch.cuda.is_available() else "cpu")
