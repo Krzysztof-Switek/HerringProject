@@ -1,9 +1,11 @@
 from pathlib import Path
+from datetime import datetime
 
 class PathManager:
     def __init__(self, project_root: Path, cfg):
         self.project_root = project_root.resolve()
         self.cfg = cfg
+        self.experiment_date = datetime.now().strftime("%Y-%m-%d")
 
     def config_path(self) -> Path:
         return self.project_root / "src" / "config" / "config.yaml"
@@ -27,7 +29,8 @@ class PathManager:
         return self.results_dir() / "logs"
 
     def excel_predictions_output(self) -> Path:
-        return self.project_root / "src" / "data_loader" / "all_predictions.xlsx"
+        filename = f"all_predictions_{self.experiment_date}.xlsx"
+        return self.project_root / "src" / "data_loader" / filename
 
     def _resolve(self, path_str: str, subdir: str = None) -> Path:
         path = Path(path_str)
