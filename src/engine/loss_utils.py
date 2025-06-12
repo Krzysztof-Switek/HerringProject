@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from collections import Counter
 
 
 class LossFactory:
@@ -35,18 +36,28 @@ class StandardCrossEntropy(nn.Module):
 class SampleWeightedCrossEntropy(nn.Module):
     def __init__(self):
         super().__init__()
+        self.weight_map = None
+
+    def _build_weight_map(self, populacje, wieki):
+        counts = Counter(zip(map(int, populacje), map(int, wieki)))
+        total = sum(counts.values())
+        raw_map = {k: total / v for k, v in counts.items()}
+        mean_weight = sum(raw_map.values()) / len(raw_map)
+        self.weight_map = {k: v / mean_weight for k, v in raw_map.items()}
 
     def forward(self, outputs, targets, meta=None):
         loss = F.cross_entropy(outputs, targets, reduction='none')
+
         if meta is None:
             return loss.mean()
 
-        weight_map = {
-            (2, 3): 1.3, (2, 4): 1.5, (2, 5): 1.6, (2, 6): 1.8,
-            (2, 7): 2.0, (2, 8): 2.0, (2, 9): 2.0, (2, 10): 2.0
-        }
-        weights = [weight_map.get((int(p), int(w)), 1.0) for p, w in zip(meta['populacja'], meta['wiek'])]
+        if self.weight_map is None:
+            self._build_weight_map(meta["populacja"], meta["wiek"])
+
+        weights = [self.weight_map.get((int(p), int(w)), 1.0)
+                   for p, w in zip(meta["populacja"], meta["wiek"])]
         weights = torch.tensor(weights, dtype=torch.float32).to(outputs.device)
+
         return (loss * weights).mean()
 
 
@@ -58,10 +69,21 @@ class WeightedAgeCrossEntropy(nn.Module):
         loss = F.cross_entropy(outputs, targets, reduction='none')
         if meta is None:
             return loss.mean()
-        age_weights = {3: 2.0, 4: 2.0, 5: 2.0, 6: 2.0}
-        weights = [age_weights.get(int(w), 1.0) for w in meta['wiek']]
+
+        # Oblicz częstość występowania każdego wieku
+        wiek_tensor = torch.tensor(meta['wiek'], dtype=torch.int64)
+        unique_ages, counts = torch.unique(wiek_tensor, return_counts=True)
+        freq_dict = {int(age.item()): count.item() for age, count in zip(unique_ages, counts)}
+
+        # Zamień częstości na wagi odwrotne (rzadsze → większa waga)
+        weights = [1.0 / freq_dict.get(int(w), 1.0) for w in meta['wiek']]
         weights = torch.tensor(weights, dtype=torch.float32).to(outputs.device)
+
+        # Normalizacja wag do średniej 1.0 (dla stabilizacji)
+        weights = weights * (len(weights) / weights.sum())
+
         return (loss * weights).mean()
+
 
 
 class FocalLossWithAgeBoost(nn.Module):
