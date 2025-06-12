@@ -1,5 +1,9 @@
-from engine.trainer import Trainer
+import sys
 from pathlib import Path
+
+sys.path.append(str(Path(__file__).resolve().parent.parent / "src"))
+
+from engine.trainer import Trainer
 
 if __name__ == "__main__":
     try:
