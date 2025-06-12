@@ -19,6 +19,8 @@ class AugmentWrapper(torch.utils.data.Dataset):
         self.transform_strong = transform_strong
         self.augment_applied = augment_applied
 
+        self._printed_augmentation_notice = False  # 🟢 DODANO: flaga do kontroli jednorazowego komunikatu
+
     def __len__(self):
         return len(self.base_dataset)
 
@@ -43,12 +45,16 @@ class AugmentWrapper(torch.utils.data.Dataset):
         if torch.rand(1).item() < prob:
             self.augment_applied[(pop, wiek)] += 1
             transform = self.transform_strong
-            if self.augment_applied[(pop, wiek)] < 5:
-                print(f"✨ Augmentacja dla ({pop}, {wiek}) - count: {count}, prob: {prob:.2f}")
+
+            # 🟢 ZAMIANA: tylko pierwszy raz wypiszemy komunikat
+            if not self._printed_augmentation_notice:
+                print("✨ Augmentacja w toku dla klas o małej liczności...")
+                self._printed_augmentation_notice = True
         else:
             transform = self.transform_base
 
         return transform(image), label, {"populacja": torch.tensor(pop), "wiek": torch.tensor(wiek)}
+
 
 
 class HerringDataset:

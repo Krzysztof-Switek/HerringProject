@@ -25,7 +25,7 @@ class Trainer:
         self.device = self._init_device()
         print(f"Using device: {self.device}")
         self._validate_data_structure()
-        self.model = HerringModel(self.cfg).to(self.device)
+        self.model = None
         self.data_loader = HerringDataset(self.cfg)
         self.last_model_path = None  # 🟢 do przechowania najlepszego modelu
 
