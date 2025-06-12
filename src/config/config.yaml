@@ -25,13 +25,13 @@ model:
 ######################### ALTERNATYWNE MODELE ###########################
 
 training:
-  loss_type: [standard_ce, ldam] # sample_weighted_ce, weighted_age_ce, focal_loss_ageboost,
-  stop_after_one_epoch: true
+  loss_type: [standard_ce, sample_weighted_ce, weighted_age_ce, focal_loss_ageboost, ldam]
+  stop_after_one_epoch: false
   epochs: 150
   learning_rate: 0.00001
   device: "auto"
   early_stopping_patience: 5
-  checkpoint_dir: "../../checkpoints"           # miejsce zapisu modelu
+  checkpoint_dir: "checkpoints"           # miejsce zapisu modelu
 
 prediction:
   model_path: "checkpoints/convnext_large_03-06/convnext_large_ACC_82.61.pth"
