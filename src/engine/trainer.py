@@ -30,7 +30,7 @@ class Trainer:
 
         current_date = datetime.now().strftime("%d-%m")
         model_name = self.cfg.model.base_model
-        log_dir = self.project_root / "results" / "logs" / f"{model_name}_{current_date}"
+        log_dir = self.path_manager.logs_dir() / f"{model_name}_{current_date}"  # 🟢 ZMIANA
         log_dir.mkdir(parents=True, exist_ok=True)
 
         self.writer = self._init_tensorboard(log_dir)
@@ -87,10 +87,10 @@ class Trainer:
         self.class_names = class_names
 
         model_name = self.cfg.model.base_model
-        checkpoint_root = Path(self.cfg.training.checkpoint_dir)
-        logs_root = self.project_root / "results" / "logs"
+        checkpoint_root = self.path_manager.checkpoint_dir()  # 🟢 ZMIANA
+        logs_root = self.path_manager.logs_dir()  # 🟢 ZMIANA
 
-        df = pd.read_excel(self.cfg.data.metadata_file)
+        df = pd.read_excel(self.path_manager.metadata_file())  # 🟢 ZMIANA
         df_train = df[df["SET"].str.lower() == "train"]
         age_counts = df_train["Wiek"].value_counts().sort_index().to_dict()
         class_counts = [age_counts.get(age, 0) for age in sorted(age_counts)]
