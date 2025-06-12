@@ -71,7 +71,7 @@ class WeightedAgeCrossEntropy(nn.Module):
             return loss.mean()
 
         # Oblicz częstość występowania każdego wieku
-        wiek_tensor = torch.tensor(meta['wiek'], dtype=torch.int64)
+        wiek_tensor = meta['wiek'].clone().detach().to(dtype=torch.int64)
         unique_ages, counts = torch.unique(wiek_tensor, return_counts=True)
         freq_dict = {int(age.item()): count.item() for age, count in zip(unique_ages, counts)}
 
