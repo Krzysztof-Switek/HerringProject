@@ -27,10 +27,11 @@ class Trainer:
         self._validate_data_structure()
         self.model = HerringModel(self.cfg).to(self.device)
         self.data_loader = HerringDataset(self.cfg)
+        self.last_model_path = None  # 🟢 do przechowania najlepszego modelu
 
         current_date = datetime.now().strftime("%d-%m")
         model_name = self.cfg.model.base_model
-        log_dir = self.path_manager.logs_dir() / f"{model_name}_{current_date}"  # 🟢 ZMIANA
+        log_dir = self.path_manager.logs_dir() / f"{model_name}_{current_date}"
         log_dir.mkdir(parents=True, exist_ok=True)
 
         self.writer = self._init_tensorboard(log_dir)
@@ -86,10 +87,10 @@ class Trainer:
         self.class_names = class_names
 
         model_name = self.cfg.model.base_model
-        checkpoint_root = self.path_manager.checkpoint_dir()  # 🟢 ZMIANA
-        logs_root = self.path_manager.logs_dir()  # 🟢 ZMIANA
+        checkpoint_root = self.path_manager.checkpoint_dir()
+        logs_root = self.path_manager.logs_dir()
 
-        df = pd.read_excel(self.path_manager.metadata_file())  # 🟢 ZMIANA
+        df = pd.read_excel(self.path_manager.metadata_file())
         df_train = df[df["SET"].str.lower() == "train"]
         age_counts = df_train["Wiek"].value_counts().sort_index().to_dict()
         class_counts = [age_counts.get(age, 0) for age in sorted(age_counts)]
@@ -157,6 +158,7 @@ class Trainer:
                     self.best_cm = val_cm
                     model_path = checkpoint_dir / f"{model_name}_{loss_name}_ACC_{val_acc:.2f}.pth"
                     torch.save(self.model.state_dict(), model_path)
+                    self.last_model_path = model_path  # 🟢 zapamiętajmy do predykcji
                     print(f"💾 Zapisano najlepszy model do: {model_path}")
                     self.early_stop_counter = 0
                 else:
@@ -177,9 +179,13 @@ class Trainer:
             if self.writer:
                 self.writer.close()
 
-            print(f"🔍 Uruchamianie predykcji dla {loss_name} na całym zbiorze...")
-            run_full_dataset_prediction(
-                loss_name=loss_name,
-                model_path=str(model_path),
-                path_manager=self.path_manager
-            )
+            # 🟢 Predykcja po treningu (jeśli zapisano model)
+            if self.last_model_path is not None:
+                print(f"🔍 Uruchamianie predykcji dla {loss_name} na całym zbiorze...")
+                run_full_dataset_prediction(
+                    loss_name=loss_name,
+                    model_path=str(self.last_model_path),
+                    path_manager=self.path_manager
+                )
+            else:
+                print(f"⚠️ Brak zapisanego modelu dla {loss_name}, predykcja pominięta.")
