@@ -1,5 +1,4 @@
 import time
-import csv
 from datetime import datetime
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter

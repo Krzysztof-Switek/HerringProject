@@ -3,7 +3,7 @@ from pathlib import Path
 from omegaconf import OmegaConf
 from data_loader.dataset import HerringDataset
 from utils.path_manager import PathManager
-from engine.trainer_core_delete import run_training_loop
+from engine.trainer_setup import run_training_loop
 
 class Trainer:
     def __init__(self, config_path: str = None, project_root: Path = None):
