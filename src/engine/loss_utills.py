@@ -156,11 +156,15 @@ class ClassBalancedFocalLoss(nn.Module):
 
     def _compute_class_weights(self):
         weights = {}
-        for cls, n in self.class_freq.items():
+        all_classes = list(range(max(self.class_freq.keys()) + 1))
+        for cls in all_classes:
+            n = self.class_freq.get(cls, 1)  # domyślnie 1, żeby nie dzielić przez zero
             effective_num = 1.0 - self.beta ** n
-            weights[cls] = (1.0 - self.beta) / (effective_num + 1e-8)
+            weight = (1.0 - self.beta) / (effective_num + 1e-8)
+            weights[cls] = weight
         total = sum(weights.values())
         return {cls: w / total for cls, w in weights.items()}
+
 
     def forward(self, outputs, targets, meta=None):
         log_probs = F.log_softmax(outputs, dim=1)

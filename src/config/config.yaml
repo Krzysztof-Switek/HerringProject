@@ -26,11 +26,11 @@ model:
 
 training:
   loss_type:
-    - asymmetric_focal
     - class_balanced_focal
     - focal_tversky
     - ghm
     - seesaw
+    - asymmetric_focal
     - standard_ce
     - sample_weighted_ce
     - weighted_age_ce
