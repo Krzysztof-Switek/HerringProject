@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parent.parent / "src"))
 
-from engine.trainer import Trainer
+from engine.trainer_old_delete import Trainer
 
 if __name__ == "__main__":
     try:
