@@ -8,7 +8,7 @@ from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
 
 from engine.train_loop import train_epoch, validate
-from engine.loss_utils import LossFactory
+from engine.loss_utils_old_delete import LossFactory
 from models.model import HerringModel
 from engine.predict_after_training import run_full_dataset_prediction
 import torch.optim as optim

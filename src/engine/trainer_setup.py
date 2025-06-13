@@ -4,7 +4,7 @@ from datetime import datetime
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from models.model import HerringModel
-from engine.loss_utils import LossFactory
+from engine.loss_utils_old_delete import LossFactory
 from .trainer_metadata import get_class_metadata
 from .trainer_logger import (
     init_metrics_logger,
