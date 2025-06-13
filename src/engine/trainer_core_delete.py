@@ -4,6 +4,9 @@ import pandas as pd
 import numpy as np
 import csv
 from datetime import datetime
+
+from torch.utils.tensorboard import SummaryWriter
+
 from engine.train_loop import train_epoch, validate
 from engine.loss_utils import LossFactory
 from models.model import HerringModel

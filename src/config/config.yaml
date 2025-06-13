@@ -25,7 +25,17 @@ model:
 ######################### ALTERNATYWNE MODELE ###########################
 
 training:
-  loss_type: [standard_ce, sample_weighted_ce, weighted_age_ce, focal_loss_ageboost, ldam]
+  loss_type:
+    - standard_ce
+    - sample_weighted_ce
+    - weighted_age_ce
+    - focal_loss_ageboost
+    - ldam
+    - asymmetric_focal
+    - class_balanced_focal
+    - focal_tversky
+    - ghm
+    - seesaw
   stop_after_one_epoch: true
   epochs: 150
   learning_rate: 0.00001
