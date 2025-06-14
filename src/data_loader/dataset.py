@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 from collections import Counter, defaultdict
 from omegaconf import DictConfig
 from pathlib import Path
-from utils.path_manager import PathManager  # 🔄 [ZMIANA 1] importujemy PathManager
+from utils.path_manager import PathManager
 
 
 class AugmentWrapper(torch.utils.data.Dataset):
@@ -19,7 +19,7 @@ class AugmentWrapper(torch.utils.data.Dataset):
         self.transform_strong = transform_strong
         self.augment_applied = augment_applied
 
-        self._printed_augmentation_notice = False  # 🟢 DODANO: flaga do kontroli jednorazowego komunikatu
+        self._printed_augmentation_notice = False
 
     def __len__(self):
         return len(self.base_dataset)
@@ -46,7 +46,6 @@ class AugmentWrapper(torch.utils.data.Dataset):
             self.augment_applied[(pop, wiek)] += 1
             transform = self.transform_strong
 
-            # 🟢 ZAMIANA: tylko pierwszy raz wypiszemy komunikat
             if not self._printed_augmentation_notice:
                 print("✨ Augmentacja w toku dla klas o małej liczności...")
                 self._printed_augmentation_notice = True
@@ -56,11 +55,10 @@ class AugmentWrapper(torch.utils.data.Dataset):
         return transform(image), label, {"populacja": torch.tensor(pop), "wiek": torch.tensor(wiek)}
 
 
-
 class HerringDataset:
     def __init__(self, config: DictConfig):
         self.cfg = config
-        self.path_manager = PathManager(Path(__file__).parent.parent.parent, config)  # 🔄 [ZMIANA 2]
+        self.path_manager = PathManager(Path(__file__).parent.parent.parent, config)
 
         self.train_transform_base = self._get_base_transforms()
         self.train_transform_strong = self._get_strong_transforms()
@@ -74,7 +72,7 @@ class HerringDataset:
         self._validate_labels()
 
     def _load_metadata(self):
-        excel_path = self.path_manager.metadata_file()  # 🔄 [ZMIANA 3]
+        excel_path = self.path_manager.metadata_file()
         if not excel_path.exists():
             raise FileNotFoundError(f"Nie znaleziono pliku Excel: {excel_path}")
 
@@ -99,35 +97,46 @@ class HerringDataset:
 
     def _get_base_transforms(self):
         return transforms.Compose([
-            transforms.Resize((self.cfg.data.image_size, self.cfg.data.image_size)),
+            transforms.Resize((self.cfg.model.image_size, self.cfg.model.image_size)),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
 
-    def _get_strong_transforms(self):
+    def _get_strong_transforms(self):  # 🔧 ZMODYFIKOWANE: korzysta z self.cfg.augmentation
+        aug = self.cfg.augmentation
         return transforms.Compose([
-            transforms.RandomRotation(30),
-            transforms.RandomResizedCrop(self.cfg.data.image_size, scale=(0.8, 1.0)),
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.RandomVerticalFlip(p=0.5),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.05),
-            transforms.RandomAffine(degrees=15, translate=(0.1, 0.1), scale=(0.9, 1.1), shear=10),
-            transforms.Resize((self.cfg.data.image_size, self.cfg.data.image_size)),
+            transforms.RandomRotation(aug.rotation),
+            transforms.RandomResizedCrop(self.cfg.model.image_size, scale=tuple(aug.crop_scale)),
+            transforms.RandomHorizontalFlip(p=aug.hflip_prob),
+            transforms.RandomVerticalFlip(p=aug.vflip_prob),
+            transforms.ColorJitter(
+                brightness=aug.brightness,
+                contrast=aug.contrast,
+                saturation=aug.saturation,
+                hue=aug.hue
+            ),
+            transforms.RandomAffine(
+                degrees=aug.affine_degrees,
+                translate=tuple(aug.affine_translate),
+                scale=tuple(aug.affine_scale),
+                shear=aug.affine_shear
+            ),
+            transforms.Resize((self.cfg.model.image_size, self.cfg.model.image_size)),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-            transforms.GaussianBlur(kernel_size=3)
+            transforms.GaussianBlur(kernel_size=aug.gaussian_blur_kernel)
         ])
 
     def _get_val_transforms(self):
         return transforms.Compose([
-            transforms.Resize(self.cfg.data.image_size),
-            transforms.CenterCrop(self.cfg.data.image_size),
+            transforms.Resize(self.cfg.model.image_size),
+            transforms.CenterCrop(self.cfg.model.image_size),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
 
     def _validate_labels(self):
-        data_root = self.path_manager.data_root()  # 🔄 [ZMIANA 4]
+        data_root = self.path_manager.data_root()
         train_labels = sorted(os.listdir(data_root / 'train'))
         val_labels = sorted(os.listdir(data_root / 'val'))
         expected_labels = ['1', '2']
@@ -136,7 +145,7 @@ class HerringDataset:
         print("✔️ Etykiety klas poprawne (1 i 2)")
 
     def get_loaders(self):
-        data_root = self.path_manager.data_root()  # 🔄 [ZMIANA 5]
+        data_root = self.path_manager.data_root()
         train_dir = data_root / 'train'
         val_dir = data_root / 'val'
 

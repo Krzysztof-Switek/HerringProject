@@ -1,19 +1,43 @@
 data:
   metadata_file: "data_loader/AnalysisWithOtolithPhoto_with_sets.xlsx"
-  root_dir: "data"                              # główny katalog danych
-  train: "train"                                # podkatalog treningowy
-  val: "val"                                    # podkatalog walidacyjny
-  test: "test"                                  # podkatalog testowy
+  root_dir: "data"
+  train: "train"
+  val: "val"
+  test: "test"
   batch_size: 32
-  image_size: 224                               # rozmiar wejściowy dla modelu
 
 model:
-  base_model: "resnet50"                        # image_size: 224
+  base_model: "resnet50"
+  image_size: 224
   num_classes: 2
   pretrained: true
   freeze_encoder: false
   dropout_rate: 0.5
   weight_decay: 0.01
+
+  expert:
+    use: true
+    base_model: "efficientnet_v2_l"
+    image_size: 480
+    pretrained: true
+    freeze_encoder: false
+    dropout_rate: 0.3
+    weight_decay: 0.01
+
+augmentation:
+  rotation: 30
+  crop_scale: [0.8, 1.0]
+  hflip_prob: 0.5
+  vflip_prob: 0.5
+  brightness: 0.2
+  contrast: 0.2
+  saturation: 0.2
+  hue: 0.05
+  affine_degrees: 15
+  affine_translate: [0.1, 0.1]
+  affine_scale: [0.9, 1.1]
+  affine_shear: 10
+  gaussian_blur_kernel: 3
 
 ######################### ALTERNATYWNE MODELE ###########################
 #                                                                       #
@@ -36,7 +60,6 @@ training:
     - weighted_age_ce
     - focal_loss_ageboost
     - ldam
-
   stop_after_one_epoch: true
   epochs: 150
   learning_rate: 0.00001
@@ -52,10 +75,10 @@ prediction:
   save_results: true                            # czy wyświetlać wykresy matplotlib
 
 prediction_modes:
-  mode: "single"                                # "single" lub "batch"
-  batch:
-    num_images: 4                               # liczba obrazów do wyświetlenia w trybie batch
-    min_confidence: 70                          # minimalna pewność predykcji dla obrazów w trybie batch
+  #mode: "single"                                # "single" lub "batch"
+  #batch:
+   # num_images: 4                               # liczba obrazów do wyświetlenia w trybie batch
+   # min_confidence: 70                          # minimalna pewność predykcji dla obrazów w trybie batch
   navigation:
     image_dir: "data/test"                      # katalog z obrazami do nawigacji w trybie single
 
