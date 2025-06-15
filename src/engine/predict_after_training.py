@@ -20,7 +20,7 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager):
 
     # Transformacja obrazu
     transform = transforms.Compose([
-        transforms.Resize(cfg.data.image_size),
+        transforms.Resize(cfg.base_model.image_size),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
@@ -31,7 +31,6 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager):
     if "FilePath" not in df.columns:
         raise ValueError("Brakuje kolumny 'FilePath' zawierającej ścieżki do obrazów")
 
-    # 🔁 🟢 ZMIANA: Zbieramy ścieżki ze wszystkich folderów
     data_root = path_manager.data_root()
     folders = ["train/1", "train/2", "val/1", "val/2", "test/1", "test/2"]
     all_image_paths = []
@@ -40,7 +39,6 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager):
         if folder_path.exists():
             all_image_paths.extend(folder_path.glob("*.jpg"))
 
-    # ✅ 🟢 ZMIANA: Predykcja raz dla całej listy
     predictions = {}
     total = len(all_image_paths)
     print(f"\n🔍 Start predykcji ({loss_name}) na {total} obrazach...")

@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import itertools
 
-EXCEL_PATH = "C:/Users/kswitek/Documents/HerringProject/src/data_loader/all_predictions_2025-06-13.xlsx"
+EXCEL_PATH = "C:/Users/kswitek/Documents/HerringProject/src/data_loader/all_predictions_2025-06-14.xlsx"
 
 LOSS_TYPES = [
     "standard_ce",

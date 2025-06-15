@@ -52,7 +52,7 @@ class HerringDataset:
 
     def _get_base_transforms(self):
         return transforms.Compose([
-            transforms.Resize((self.cfg.model.image_size, self.cfg.model.image_size)),
+            transforms.Resize((self.cfg.base_model.image_size, self.cfg.base_model.image_size)),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
@@ -61,7 +61,7 @@ class HerringDataset:
         aug = self.cfg.augmentation
         return transforms.Compose([
             transforms.RandomRotation(aug.rotation),
-            transforms.RandomResizedCrop(self.cfg.model.image_size, scale=tuple(aug.crop_scale)),
+            transforms.RandomResizedCrop(self.cfg.base_model.image_size, scale=tuple(aug.crop_scale)),
             transforms.RandomHorizontalFlip(p=aug.hflip_prob),
             transforms.RandomVerticalFlip(p=aug.vflip_prob),
             transforms.ColorJitter(
@@ -76,7 +76,7 @@ class HerringDataset:
                 scale=tuple(aug.affine_scale),
                 shear=aug.affine_shear
             ),
-            transforms.Resize((self.cfg.model.image_size, self.cfg.model.image_size)),
+            transforms.Resize((self.cfg.base_model.image_size, self.cfg.base_model.image_size)),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             transforms.GaussianBlur(kernel_size=aug.gaussian_blur_kernel)
@@ -84,8 +84,8 @@ class HerringDataset:
 
     def _get_val_transforms(self):
         return transforms.Compose([
-            transforms.Resize(self.cfg.model.image_size),
-            transforms.CenterCrop(self.cfg.model.image_size),
+            transforms.Resize(self.cfg.base_model.image_size),
+            transforms.CenterCrop(self.cfg.base_model.image_size),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])

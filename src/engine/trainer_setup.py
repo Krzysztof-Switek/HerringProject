@@ -19,7 +19,7 @@ def run_training_loop(trainer):
     train_loader, val_loader, class_names = trainer.data_loader.get_loaders()
     trainer.class_names = class_names
 
-    model_name = trainer.cfg.model.base_model
+    model_name = trainer.cfg.base_model.base_model
     checkpoint_root = trainer.path_manager.checkpoint_dir()
     logs_root = trainer.path_manager.logs_dir()
     metadata = get_class_metadata(trainer)
@@ -39,7 +39,7 @@ def run_training_loop(trainer):
 
         trainer.model = HerringModel(trainer.cfg).to(trainer.device)
         optimizer = optim.AdamW(trainer.model.parameters(), lr=trainer.cfg.training.learning_rate,
-                                weight_decay=trainer.cfg.model.weight_decay)
+                                weight_decay=trainer.cfg.base_model.weight_decay)
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=trainer.cfg.training.epochs)
 
         timestamp = datetime.now().strftime('%d-%m_%H-%M')
@@ -87,6 +87,8 @@ def run_training_loop(trainer):
 
         if trainer.last_model_path is not None:
             print(f"🔍 Uruchamianie predykcji dla {loss_name} na całym zbiorze...")
+            from .trainer_logger import log_augmentation_summary
+            log_augmentation_summary(trainer.data_loader.augment_applied, model_name)
             run_full_dataset_prediction(
                 loss_name=loss_name,
                 model_path=str(trainer.last_model_path),
