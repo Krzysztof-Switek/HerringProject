@@ -28,9 +28,13 @@ class PathManager:
     def logs_dir(self) -> Path:
         return self.results_dir() / "logs"
 
-    def excel_predictions_output(self) -> Path:
-        filename = f"all_predictions_{self.experiment_date}.xlsx"
-        return self.project_root / "src" / "data_loader" / filename
+    def excel_predictions_output(self, loss_name: str) -> Path:
+        model_name = self.cfg.model.base_model.replace("/", "_").lower()
+        date = self.experiment_date
+        output_dir = self.logs_dir() / f"{model_name}_{loss_name}_{date}"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{model_name}_{date}_predictions.xlsx"
+        return output_dir / filename
 
     def _resolve(self, path_str: str, subdir: str = None) -> Path:
         path = Path(path_str)
