@@ -1,51 +1,105 @@
-import os
-import re
-from pathlib import Path
+import torch.nn as nn
+from torchvision import models
+from omegaconf import DictConfig
+import torch
+import warnings
 
-PROJECT_ROOT = Path(__file__).parent.parent
-SRC_DIR = PROJECT_ROOT / "src"
+class HerringModel(nn.Module):
+    def __init__(self, config: DictConfig):
+        super().__init__()
+        self.full_cfg = config
+        self.cfg = config.base_model
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.base = self._init_base_model().to(self.device)
+        self._print_model_info()
 
-# Uwzględniamy tylko te dwa pliki:
-INCLUDED_FILES = {
-    SRC_DIR / "models" / "model.py",
-    SRC_DIR / "engine" / "predict_after_training.py",
-    SRC_DIR / "engine" / "trainer_setup.py",
-    SRC_DIR / "engine" / "trainer_metadata.py",
-}
+    def _init_base_model(self) -> nn.Module:
+        """Initialize base model with automatic device placement"""
+        # Model-specific configurations
+        model_config = {
+            "resnet50": {"image_size": 224, "classifier": "fc"},
+            "convnext_large": {"image_size": 384, "classifier": "classifier"},
+            "vit_h_14": {"image_size": 384, "classifier": "heads"},
+            "efficientnet_v2_l": {"image_size": 480, "classifier": "classifier"},
+            "regnet_y_32gf": {"image_size": 384, "classifier": "fc"},
+        }
 
+        if self.cfg.base_model not in model_config:
+            available_models = list(model_config.keys())
+            raise ValueError(f"Model {self.cfg.base_model} not configured. Choose from: {available_models}")
 
-def is_allowed(line: str) -> bool:
-    """
-    Sprawdza, czy linia jest dopuszczalna mimo użycia 'model'
-    """
-    allowed_patterns = [
-        r"\base_model\b",
-        r"\expert_model\b",
-        r"models\.",  # torchvision.models itp.
-        r"model_to_column_map",
-        r"model_name",
-        r"model_path",
-        r"model.eval\(",
-        r"model.train\(",
-        r"self\.model\b",  # dozwolone w klasach, można doprecyzować
-    ]
-    return any(re.search(pattern, line) for pattern in allowed_patterns)
+        # Handle weights
+        weights = None
+        if self.cfg.pretrained:
+            if self.cfg.base_model == "resnet50":
+                weights = models.ResNet50_Weights.IMAGENET1K_V1
+            elif self.cfg.base_model == "efficientnet_v2_l":
+                weights = models.EfficientNet_V2_L_Weights.IMAGENET1K_V1
+            elif self.cfg.base_model == "convnext_large":
+                weights = models.ConvNeXt_Large_Weights.IMAGENET1K_V1
+            elif self.cfg.base_model == "vit_h_14":
+                weights = models.ViT_H_14_Weights.IMAGENET1K_V1
+            elif self.cfg.base_model == "regnet_y_32gf":
+                weights = models.RegNet_Y_32GF_Weights.IMAGENET1K_V1
+            else:
+                warnings.warn(f"No weights enum for {self.cfg.base_model}, using default initialization")
+                weights = "DEFAULT"
 
+        # Initialize model
+        model = getattr(models, self.cfg.base_model)(weights=weights)
 
-def test_no_ambiguous_model_usage_in_core_files():
-    violations = []
+        # (zamraża encoder, nie klasyfikator)
+        if self.cfg.freeze_encoder:
+            for name, param in model.named_parameters():
+                if not any(c in name.lower() for c in ['fc', 'classifier', 'head']):
+                    param.requires_grad = False
 
-    for file_path in INCLUDED_FILES:
-        if not file_path.exists():
-            continue
+        # Modify the classifier to match the number of classes
+        dropout_p = getattr(self.cfg, "dropout_rate", 0.0)
+        classifier_path = model_config[self.cfg.base_model]["classifier"].split('.')
 
-        with open(file_path, "r", encoding="utf-8") as f:
-            for i, line in enumerate(f, start=1):
-                if "model" in line and not is_allowed(line):
-                    if not re.search(r"\b(base_model|expert_model)\b", line):
-                        relative_path = file_path.relative_to(PROJECT_ROOT)
-                        violations.append(f"{relative_path}:{i}: {line.strip()}")
+        # Navigate to the classifier layer
+        parent_module = model
+        for part in classifier_path[:-1]:
+            parent_module = getattr(parent_module, part)
 
-    assert not violations, (
-        "❗ Ambiguous 'model' usages found in critical files:\n" + "\n".join(violations)
-    )
+        last_part = classifier_path[-1]
+        original_classifier = getattr(parent_module, last_part)
+
+        if isinstance(original_classifier, nn.Sequential):
+            # For sequential classifiers (like in ConvNeXt)
+            num_features = original_classifier[-1].in_features
+            new_classifier = nn.Sequential(
+                nn.Dropout(p=dropout_p),
+                nn.Linear(num_features, self.full_cfg.data.num_classes)
+            )
+            original_classifier[-1] = new_classifier
+        else:
+            # For simple linear classifiers
+            num_features = original_classifier.in_features
+            setattr(parent_module, last_part, nn.Sequential(
+                nn.Dropout(p=dropout_p),
+                nn.Linear(num_features, self.full_cfg.data.num_classes)
+            ))
+
+        return model
+
+    def _print_model_info(self):
+        """Print detailed model information"""
+        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in self.parameters())
+
+        print("\n" + "=" * 50)
+        print(f"Model initialized on device: {self.device}")
+        print(f"Architecture: {self.cfg.base_model}")
+        print(f"Total parameters: {total_params:,}")
+        print(f"Trainable parameters: {trainable_params:,}")
+        print(f"Pretrained weights: {self.cfg.pretrained}")
+        print(f"Frozen encoder: {self.cfg.freeze_encoder}")
+        print(f"Dropout rate: {getattr(self.cfg, 'dropout_rate', 0.0)}")
+        print("=" * 50 + "\n")
+
+    def forward(self, x):
+        if x.device != self.device:
+            x = x.to(self.device)
+        return self.base(x)
