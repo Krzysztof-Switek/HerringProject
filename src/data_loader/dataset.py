@@ -29,7 +29,6 @@ class HerringValDataset(Dataset):
         fname = os.path.basename(path).strip().lower()
         meta = self.metadata.get(fname, (-9, -9))
         pop = meta[0]
-        print(f"DEBUG [dataset::_is_valid] path: {path}, fname: {fname}, meta: {meta}, pop: {pop}, active_populations: {self.active_populations}")
         return pop in self.active_populations
 
     def __len__(self):
