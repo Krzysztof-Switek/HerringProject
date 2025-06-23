@@ -2,13 +2,32 @@ import os
 import torch
 import pandas as pd
 from torchvision import transforms, datasets
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from collections import Counter, defaultdict
 from omegaconf import DictConfig
 from pathlib import Path
 from utils.path_manager import PathManager
 from engine.augment_utils import AugmentWrapper
+from PIL import Image
 
+# Klasa walidacyjna, zwraca (obraz, label, meta)
+class HerringValDataset(Dataset):
+    def __init__(self, image_folder, metadata, transform):
+        self.image_folder = image_folder
+        self.metadata = metadata
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.image_folder)
+
+    def __getitem__(self, idx):
+        path, label = self.image_folder.imgs[idx]
+        image = Image.open(path).convert("RGB")
+        img_tensor = self.transform(image)
+        filename = os.path.basename(path).strip().lower()
+        pop, wiek = self.metadata.get(filename, (-1, -9))
+        meta = {'pop': pop, 'wiek': wiek}
+        return img_tensor, label, meta
 
 class HerringDataset:
     def __init__(self, config: DictConfig):
@@ -49,7 +68,6 @@ class HerringDataset:
             counter[(pop, wiek)] += 1
         return counter
 
-    # 🔧 NOWA METODA – dynamiczny wybór image_size
     def _get_image_size(self):
         if self.cfg.get("multitask_model") and self.cfg.multitask_model.use:
             return self.cfg.multitask_model.backbone_model.image_size
@@ -115,7 +133,8 @@ class HerringDataset:
         train_base = datasets.ImageFolder(str(train_dir))
         train_base.transform = self.train_transform_base
 
-        val_set = datasets.ImageFolder(str(val_dir), transform=self.val_transform)
+        val_base = datasets.ImageFolder(str(val_dir))
+        val_set = HerringValDataset(val_base, self.metadata, self.val_transform)
 
         train_set = AugmentWrapper(
             base_dataset=train_base,

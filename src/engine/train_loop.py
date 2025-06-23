@@ -46,7 +46,6 @@ def train_epoch(model, device, dataloader, loss_fn, optimizer):
         "targets": all_targets
     }
 
-
 def validate(model, device, dataloader, loss_fn):
     model.eval()
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
@@ -54,11 +53,14 @@ def validate(model, device, dataloader, loss_fn):
 
     with torch.no_grad():
         for batch in dataloader:
-            if len(batch) == 3:
-                inputs, targets, meta = batch
-            else:
-                inputs, targets = batch
-                meta = None
+            # --- ZMIANA START ---
+            if len(batch) != 3:
+                raise ValueError(
+                    f"Batch walidacyjny musi zawierać 3 elementy: (inputs, targets, meta). "
+                    f"Aktualnie: {len(batch)} elementów! Popraw DataLoader dla walidacji."
+                )
+            inputs, targets, meta = batch
+            # --- ZMIANA KONIEC ---
 
             inputs, targets = inputs.to(device), targets.to(device)
             outputs = model(inputs)
