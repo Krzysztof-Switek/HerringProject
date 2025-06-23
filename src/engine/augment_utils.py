@@ -18,14 +18,12 @@ class AugmentWrapper(torch.utils.data.Dataset):
             idx for idx, (path, label) in enumerate(self.base_dataset.samples)
             if self._is_valid(path)
         ]
-        print(f"DEBUG [augment_utils] valid_indices length: {len(self.valid_indices)}")
-        print(f"DEBUG [augment_utils] first 5 valid indices: {self.valid_indices[:5]}")
+
 
     def _is_valid(self, path):
         fname = os.path.basename(path).strip().lower()
         meta = self.metadata.get(fname, (-9, -9))   # -9 oznacza brak/nieznany
         pop = meta[0]
-        print(f"DEBUG [augment_utils::_is_valid] path: {path}, fname: {fname}, meta: {meta}, pop: {pop}, active_populations: {self.active_populations}")
         return pop in self.active_populations
 
     def __len__(self):
