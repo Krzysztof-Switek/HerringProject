@@ -12,23 +12,24 @@ from PIL import Image
 
 # Klasa walidacyjna, zwraca (obraz, label, meta)
 class HerringValDataset(Dataset):
-    def __init__(self, image_folder, metadata, transform, active_populations):
+    def __init__(self, image_folder, metadata, transform, active_populations):  # 🟢 ZMIANA
         self.image_folder = image_folder
         self.metadata = metadata
         self.transform = transform
-        self.active_populations = active_populations
+        self.active_populations = list(active_populations)  # 🟢 ZMIANA
 
         #  FILTRUJ tylko populacje z configa
         self.valid_indices = [
             idx for idx, (path, label) in enumerate(self.image_folder.imgs)
             if self._is_valid(path)
         ]
+        print(f"🟠 DEBUG: Val valid_indices length: {len(self.valid_indices)}")  # 🟠 DEBUG
 
     def _is_valid(self, path):
         fname = os.path.basename(path).strip().lower()
         meta = self.metadata.get(fname, (-9, -9))
         pop = meta[0]
-        return pop in self.active_populations
+        return pop in self.active_populations  # 🟢 ZMIANA
 
     def __len__(self):
         return len(self.valid_indices)
@@ -54,9 +55,10 @@ class HerringDataset:
         self.class_counts = self._compute_class_counts()
         self.max_count = max(self.class_counts.values())
         self.augment_applied = defaultdict(int)
-        self.active_populations = list(self.cfg.data.active_populations)
+        self.active_populations = list(self.cfg.data.active_populations)  # 🟢 ZMIANA
 
         print(f"\n📊 Największa liczność klas (populacja, wiek): {self.max_count}")
+        print(f"🟠 DEBUG: Aktywne populacje z configa: {self.active_populations}")  # 🟠 DEBUG
         self._validate_labels()
 
     def _load_metadata(self):
@@ -70,6 +72,10 @@ class HerringDataset:
 
         df["Wiek"] = pd.to_numeric(df["Wiek"], errors="coerce").fillna(-9).astype(int)
         df["Populacja"] = pd.to_numeric(df["Populacja"], errors="coerce").fillna(-9).astype(int)
+
+        # 🟠 DEBUG: policz ile rekordów na populację (z excela)
+        pop_stats = dict(Counter(df["Populacja"]))
+        print(f"🟠 DEBUG: Liczność populacji w Excelu: {pop_stats}")
 
         return {
             str(row["FileName"]).strip().lower(): (int(row["Populacja"]), int(row["Wiek"]))
@@ -134,7 +140,7 @@ class HerringDataset:
         data_root = self.path_manager.data_root()
         train_labels = sorted(os.listdir(data_root / 'train'))
         val_labels = sorted(os.listdir(data_root / 'val'))
-        expected_labels = sorted([str(p) for p in self.active_populations])
+        expected_labels = sorted([str(p) for p in self.active_populations])  # 🟢 ZMIANA
         if train_labels != expected_labels or val_labels != expected_labels:
             raise ValueError(f"Niepoprawne etykiety: {train_labels}, {val_labels}")
         print(f"✔️ Etykiety klas poprawne {expected_labels}")
@@ -148,7 +154,7 @@ class HerringDataset:
         train_base.transform = self.train_transform_base
 
         val_base = datasets.ImageFolder(str(val_dir))
-        val_set = HerringValDataset(val_base, self.metadata, self.val_transform, self.active_populations)
+        val_set = HerringValDataset(val_base, self.metadata, self.val_transform, self.active_populations)  # 🟢 ZMIANA
 
         train_set = AugmentWrapper(
             base_dataset=train_base,
@@ -158,7 +164,7 @@ class HerringDataset:
             transform_base=self.train_transform_base,
             transform_strong=self.train_transform_strong,
             augment_applied=self.augment_applied,
-            active_populations=self.active_populations,
+            active_populations=self.active_populations,   # 🟢 ZMIANA
         )
 
         train_loader = DataLoader(
@@ -177,5 +183,11 @@ class HerringDataset:
             pin_memory=torch.cuda.is_available()
         )
 
-        return train_loader, val_loader, train_base.classes
+        # 🟠 DEBUG: liczność etykiet w train_loader
+        debug_labels = []
+        for _, label, meta in train_loader.dataset:
+            debug_labels.append(meta['populacja'])
+        from collections import Counter as Cnt
+        print("🟠 DEBUG: Rozkład populacji w train_loader:", dict(Cnt(debug_labels)))  # 🟠 DEBUG
 
+        return train_loader, val_loader, train_base.classes

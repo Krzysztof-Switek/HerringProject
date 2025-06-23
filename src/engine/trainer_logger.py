@@ -7,9 +7,9 @@ def init_metrics_logger(trainer, log_dir, full_name):
     metrics_file_path = log_dir / f"{full_name}_training_metrics.csv"
     trainer.metrics_file = open(metrics_file_path, mode="w", newline="")
     trainer.metrics_writer = csv.writer(trainer.metrics_file)
-    # 🟢 ZMIANA: dynamicznie nagłówki dla każdej populacji
-    class_labels = list(trainer.cfg.data.active_populations)  # 🟢 ZMIANA
-    class_headers = [f"Train Class {pop}" for pop in class_labels]  # 🟢 ZMIANA
+    # dynamicznie nagłówki dla każdej populacji
+    class_labels = list(trainer.cfg.data.active_populations)
+    class_headers = [f"Train Class {pop}" for pop in class_labels]
     trainer.metrics_writer.writerow([
         'Epoch', 'Train Samples', 'Val Samples', *class_headers,
         'Train Loss', 'Train Accuracy', 'Train Precision', 'Train Recall', 'Train F1', 'Train AUC',
@@ -18,15 +18,15 @@ def init_metrics_logger(trainer, log_dir, full_name):
     ])
 
 def log_epoch_metrics(trainer, epoch, loss_name, train_metrics, val_metrics, epoch_time):
-    # 🟢 ZMIANA: dynamicznie pobierane klasy
-    class_labels = list(trainer.cfg.data.active_populations)  # 🟢 ZMIANA
-    train_class_counts = get_class_distribution(train_metrics["targets"], class_labels)  # 🟢 ZMIANA
-    val_class_counts = get_class_distribution(val_metrics["targets"], class_labels)      # 🟢 ZMIANA
+    #  dynamicznie pobierane klasy
+    class_labels = list(trainer.cfg.data.active_populations)
+    train_class_counts = get_class_distribution(train_metrics["targets"], class_labels)
+    val_class_counts = get_class_distribution(val_metrics["targets"], class_labels)
     val_samples = len(val_metrics["targets"])
     train_samples = len(train_metrics["targets"])
 
-    # 🟢 ZMIANA: dynamiczny print klas
-    class_dist_str = ", ".join([f"{lbl}: {cnt}" for lbl, cnt in zip(class_labels, train_class_counts)])  # 🟢 ZMIANA
+    #  dynamiczny print klas
+    class_dist_str = ", ".join([f"{lbl}: {cnt}" for lbl, cnt in zip(class_labels, train_class_counts)])
     print(f"\nEpoch {epoch + 1}/{trainer.cfg.training.epochs} ({loss_name}):")
     print(f"Train - Loss: {train_metrics['loss']:.4f}, Acc: {train_metrics['acc']:.2f}%, "
           f"Precision: {train_metrics['precision']:.2f}, Recall: {train_metrics['recall']:.2f}, "

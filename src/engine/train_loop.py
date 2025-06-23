@@ -7,7 +7,7 @@ def train_epoch(model, device, dataloader, loss_fn, optimizer):
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
     all_targets, all_preds, all_probs = [], [], []
 
-    # 🟢 ZMIANA: pobierz klasy z dataloadera, najlepiej z configu
+    # pobierz klasy z dataloadera, najlepiej z configu
     class_labels = None
     if hasattr(dataloader.dataset, 'base_dataset') and hasattr(dataloader.dataset.base_dataset, 'classes'):
         class_labels = [int(x) for x in dataloader.dataset.base_dataset.classes]
@@ -65,7 +65,7 @@ def validate(model, device, dataloader, loss_fn):
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
     all_targets, all_preds, all_probs = [], [], []
 
-    # 🟢 ZMIANA: pobierz klasy z dataloadera, najlepiej z configu
+    # pobierz klasy z dataloadera, najlepiej z configu
     class_labels = None
     if hasattr(dataloader.dataset, 'base_dataset') and hasattr(dataloader.dataset.base_dataset, 'classes'):
         class_labels = [int(x) for x in dataloader.dataset.base_dataset.classes]
