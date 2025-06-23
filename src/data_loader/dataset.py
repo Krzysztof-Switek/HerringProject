@@ -12,11 +12,13 @@ from PIL import Image
 
 # Klasa walidacyjna, zwraca (obraz, label, meta)
 class HerringValDataset(Dataset):
-    def __init__(self, image_folder, metadata, transform):
+    def __init__(self, image_folder, metadata, transform, active_populations):
         self.image_folder = image_folder
         self.metadata = metadata
         self.transform = transform
-        # 🟢 ZMIANA: Filtrowanie tylko tych indeksów, które mają Populację 1 lub 2
+        self.active_populations = active_populations
+
+        #  FILTRUJ tylko populacje z configa
         self.valid_indices = [
             idx for idx, (path, label) in enumerate(self.image_folder.imgs)
             if self._is_valid(path)
@@ -24,21 +26,21 @@ class HerringValDataset(Dataset):
 
     def _is_valid(self, path):
         fname = os.path.basename(path).strip().lower()
-        meta = self.metadata.get(fname, (-9, -9))    # 🟢 ZMIANA (-1 zamienione na -9)
+        meta = self.metadata.get(fname, (-9, -9))
         pop = meta[0]
-        return pop in [1, 2]   # 🟢 ZMIANA
+        return pop in self.active_populations  # 🟢 ZMIANA
 
     def __len__(self):
-        return len(self.valid_indices)  # 🟢 ZMIANA
+        return len(self.valid_indices)
 
     def __getitem__(self, idx):
-        real_idx = self.valid_indices[idx]   # 🟢 ZMIANA
+        real_idx = self.valid_indices[idx]
         path, label = self.image_folder.imgs[real_idx]
         image = Image.open(path).convert("RGB")
         img_tensor = self.transform(image)
         filename = os.path.basename(path).strip().lower()
-        pop, wiek = self.metadata.get(filename, (-9, -9))   # 🟢 ZMIANA
-        meta = {'pop': pop, 'wiek': wiek}
+        pop, wiek = self.metadata.get(filename, (-9, -9))
+        meta = {'populacja': pop, 'wiek': wiek}
         return img_tensor, label, meta
 
 class HerringDataset:
@@ -52,6 +54,7 @@ class HerringDataset:
         self.class_counts = self._compute_class_counts()
         self.max_count = max(self.class_counts.values())
         self.augment_applied = defaultdict(int)
+        self.active_populations = list(self.cfg.data.active_populations)  # 🟢 ZMIANA
 
         print(f"\n📊 Największa liczność klas (populacja, wiek): {self.max_count}")
         self._validate_labels()
@@ -65,9 +68,8 @@ class HerringDataset:
         if not all(col in df.columns for col in ["FileName", "Populacja", "Wiek"]):
             raise ValueError("Plik Excel musi zawierać kolumny: 'FileName', 'Populacja', 'Wiek'.")
 
-        # 🟢 ZMIANA: NIE filtruj – zachowaj wszystkie populacje, puste zamień na -9
-        df["Wiek"] = pd.to_numeric(df["Wiek"], errors="coerce").fillna(-9).astype(int)        # 🟢 ZMIANA
-        df["Populacja"] = pd.to_numeric(df["Populacja"], errors="coerce").fillna(-9).astype(int)   # 🟢 ZMIANA
+        df["Wiek"] = pd.to_numeric(df["Wiek"], errors="coerce").fillna(-9).astype(int)
+        df["Populacja"] = pd.to_numeric(df["Populacja"], errors="coerce").fillna(-9).astype(int)
 
         return {
             str(row["FileName"]).strip().lower(): (int(row["Populacja"]), int(row["Wiek"]))
@@ -132,10 +134,10 @@ class HerringDataset:
         data_root = self.path_manager.data_root()
         train_labels = sorted(os.listdir(data_root / 'train'))
         val_labels = sorted(os.listdir(data_root / 'val'))
-        expected_labels = ['1', '2']  # 🟢 ZMIANA: nie zmieniaj etykiet!
+        expected_labels = sorted([str(p) for p in self.active_populations])
         if train_labels != expected_labels or val_labels != expected_labels:
             raise ValueError(f"Niepoprawne etykiety: {train_labels}, {val_labels}")
-        print("✔️ Etykiety klas poprawne (1 i 2)")
+        print(f"✔️ Etykiety klas poprawne {expected_labels}")
 
     def get_loaders(self):
         data_root = self.path_manager.data_root()
@@ -146,7 +148,7 @@ class HerringDataset:
         train_base.transform = self.train_transform_base
 
         val_base = datasets.ImageFolder(str(val_dir))
-        val_set = HerringValDataset(val_base, self.metadata, self.val_transform)   # 🟢 ZMIANA: nowy dataset z filtrem 1/2
+        val_set = HerringValDataset(val_base, self.metadata, self.val_transform, self.active_populations)
 
         train_set = AugmentWrapper(
             base_dataset=train_base,
@@ -155,7 +157,8 @@ class HerringDataset:
             max_count=self.max_count,
             transform_base=self.train_transform_base,
             transform_strong=self.train_transform_strong,
-            augment_applied=self.augment_applied
+            augment_applied=self.augment_applied,
+            active_populations=self.active_populations,
         )
 
         train_loader = DataLoader(

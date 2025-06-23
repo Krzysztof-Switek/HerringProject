@@ -2,7 +2,7 @@ import os
 import torch
 
 class AugmentWrapper(torch.utils.data.Dataset):
-    def __init__(self, base_dataset, metadata, class_counts, max_count, transform_base, transform_strong, augment_applied):
+    def __init__(self, base_dataset, metadata, class_counts, max_count, transform_base, transform_strong, augment_applied, active_populations):
         self.base_dataset = base_dataset
         self.metadata = metadata
         self.class_counts = class_counts
@@ -10,10 +10,10 @@ class AugmentWrapper(torch.utils.data.Dataset):
         self.transform_base = transform_base
         self.transform_strong = transform_strong
         self.augment_applied = augment_applied
-
+        self.active_populations = active_populations
         self._printed_augmentation_notice = False
 
-        # 🟢 FILTRUJ INDEKSY tylko dla populacji 1/2
+        # FILTRUJ INDEKSY tylko dla populacji z configa
         self.valid_indices = [
             idx for idx, (path, label) in enumerate(self.base_dataset.samples)
             if self._is_valid(path)
@@ -23,13 +23,13 @@ class AugmentWrapper(torch.utils.data.Dataset):
         fname = os.path.basename(path).strip().lower()
         meta = self.metadata.get(fname, (-9, -9))   # -9 oznacza brak/nieznany
         pop = meta[0]
-        return pop in [1, 2]
+        return pop in self.active_populations
 
     def __len__(self):
-        return len(self.valid_indices)   # 🟢
+        return len(self.valid_indices)
 
     def __getitem__(self, idx):
-        real_idx = self.valid_indices[idx]   # 🟢
+        real_idx = self.valid_indices[idx]
         path, label = self.base_dataset.samples[real_idx]
         image = self.base_dataset.loader(path)
 
@@ -42,12 +42,11 @@ class AugmentWrapper(torch.utils.data.Dataset):
 
         pop, wiek = self.metadata[fname]
 
-        # 🟢 OSTATECZNE zabezpieczenie — jeśli trafia spoza 1/2, wywal wyjątek!
-        if pop not in [1, 2]:
-            raise ValueError(f"Plik {fname} ma niedozwoloną populację: {pop} (tylko 1/2 dozwolone)")
+        # OSTATECZNE zabezpieczenie — jeśli trafia spoza configa, wywal wyjątek!
+        if pop not in self.active_populations:
+            raise ValueError(f"Plik {fname} ma niedozwoloną populację: {pop} (dozwolone: {self.active_populations})")
 
         count = self.class_counts.get((pop, wiek), 0)
-
         desired_total = self.max_count
         augment_needed = max(0, desired_total - count)
         prob = min(1.0, augment_needed / desired_total)
