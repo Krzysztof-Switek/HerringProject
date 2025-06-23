@@ -1,43 +1,45 @@
 import os
 import torch
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
-from PIL import Image
 import pandas as pd
+from torchvision import transforms, datasets
+from torch.utils.data import DataLoader, Dataset
 from collections import Counter, defaultdict
-from pathlib import Path
 from omegaconf import DictConfig
+from pathlib import Path
 from utils.path_manager import PathManager
+from engine.augment_utils import AugmentWrapper
+from PIL import Image
 
-class HerringCustomDataset(Dataset):
-    def __init__(self, root_dir, metadata, transform, valid_pops=[1, 2]):  # <--- możesz podać dowolne populacje
-        self.root_dir = root_dir
+# Klasa walidacyjna, zwraca (obraz, label, meta)
+class HerringValDataset(Dataset):
+    def __init__(self, image_folder, metadata, transform):
+        self.image_folder = image_folder
         self.metadata = metadata
         self.transform = transform
-        self.valid_pops = valid_pops  # 🟢 pozwala ograniczyć tylko do 1,2, jeśli chcesz
-        self.imgs = []
+        # 🟢 ZMIANA: Filtrowanie tylko tych indeksów, które mają Populację 1 lub 2
+        self.valid_indices = [
+            idx for idx, (path, label) in enumerate(self.image_folder.imgs)
+            if self._is_valid(path)
+        ]
 
-        # --- 🟢 Najważniejsze: Budujemy listę (ścieżka, populacja) tylko dla właściwych populacji ---
-        for pop in self.valid_pops:
-            pop_dir = os.path.join(root_dir, str(pop))
-            if os.path.isdir(pop_dir):
-                for fname in os.listdir(pop_dir):
-                    if fname.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
-                        self.imgs.append((os.path.join(pop_dir, fname), pop))
+    def _is_valid(self, path):
+        fname = os.path.basename(path).strip().lower()
+        meta = self.metadata.get(fname, (-9, -9))    # 🟢 ZMIANA (-1 zamienione na -9)
+        pop = meta[0]
+        return pop in [1, 2]   # 🟢 ZMIANA
 
     def __len__(self):
-        return len(self.imgs)
+        return len(self.valid_indices)  # 🟢 ZMIANA
 
     def __getitem__(self, idx):
-        path, pop = self.imgs[idx]   # 🟢 label = rzeczywista populacja (1/2/3/0)
+        real_idx = self.valid_indices[idx]   # 🟢 ZMIANA
+        path, label = self.image_folder.imgs[real_idx]
         image = Image.open(path).convert("RGB")
         img_tensor = self.transform(image)
         filename = os.path.basename(path).strip().lower()
-        wiek = self.metadata.get(filename, (-1, -9))[1]
-        meta = {"populacja": pop, "wiek": wiek}
-        return img_tensor, pop, meta   # 🟢 zawsze pop, nie (0/1), tylko (1/2/...)
-
-# -------------------------------------------------------------
+        pop, wiek = self.metadata.get(filename, (-9, -9))   # 🟢 ZMIANA
+        meta = {'pop': pop, 'wiek': wiek}
+        return img_tensor, label, meta
 
 class HerringDataset:
     def __init__(self, config: DictConfig):
@@ -50,6 +52,7 @@ class HerringDataset:
         self.class_counts = self._compute_class_counts()
         self.max_count = max(self.class_counts.values())
         self.augment_applied = defaultdict(int)
+
         print(f"\n📊 Największa liczność klas (populacja, wiek): {self.max_count}")
         self._validate_labels()
 
@@ -61,9 +64,11 @@ class HerringDataset:
         df = pd.read_excel(excel_path, engine="openpyxl")
         if not all(col in df.columns for col in ["FileName", "Populacja", "Wiek"]):
             raise ValueError("Plik Excel musi zawierać kolumny: 'FileName', 'Populacja', 'Wiek'.")
-        df["Wiek"] = df["Wiek"].fillna(-9).astype(int)
-        df["Populacja"] = df["Populacja"].astype(int)
-        # --- 🟢 Tu NIE filtrujemy populacji – może być 0,1,2,3 ---
+
+        # 🟢 ZMIANA: NIE filtruj – zachowaj wszystkie populacje, puste zamień na -9
+        df["Wiek"] = pd.to_numeric(df["Wiek"], errors="coerce").fillna(-9).astype(int)        # 🟢 ZMIANA
+        df["Populacja"] = pd.to_numeric(df["Populacja"], errors="coerce").fillna(-9).astype(int)   # 🟢 ZMIANA
+
         return {
             str(row["FileName"]).strip().lower(): (int(row["Populacja"]), int(row["Wiek"]))
             for _, row in df.iterrows()
@@ -125,33 +130,26 @@ class HerringDataset:
 
     def _validate_labels(self):
         data_root = self.path_manager.data_root()
-        # --- 🟢 Sprawdza obecność folderów 1,2,3,0 ---
-        folder_labels = sorted([f for f in os.listdir(data_root / 'train') if os.path.isdir(data_root / 'train' / f)])
-        print(f"Etykiety folderów train: {folder_labels}")
-        # Jeśli oczekujesz tylko [1,2], zmień poniżej
-        # if folder_labels != ['1', '2']: ... raise
-        # Jeśli chcesz obsłużyć 0/1/2/3, zmień na poniższe:
-        # expected_labels = ['0', '1', '2', '3']
-        # if any(lbl not in folder_labels for lbl in expected_labels):
-        #     raise ValueError(...)
-        print("✔️ Etykiety folderów są zgodne z populacjami biologicznymi")
+        train_labels = sorted(os.listdir(data_root / 'train'))
+        val_labels = sorted(os.listdir(data_root / 'val'))
+        expected_labels = ['1', '2']  # 🟢 ZMIANA: nie zmieniaj etykiet!
+        if train_labels != expected_labels or val_labels != expected_labels:
+            raise ValueError(f"Niepoprawne etykiety: {train_labels}, {val_labels}")
+        print("✔️ Etykiety klas poprawne (1 i 2)")
 
     def get_loaders(self):
         data_root = self.path_manager.data_root()
         train_dir = data_root / 'train'
         val_dir = data_root / 'val'
 
-        # --- 🟢 ZAMIANA: własny dataset, nie ImageFolder ---
-        train_set = HerringCustomDataset(
-            str(train_dir), self.metadata, self.train_transform_base, valid_pops=[1, 2]
-        )
-        val_set = HerringCustomDataset(
-            str(val_dir), self.metadata, self.val_transform, valid_pops=[1, 2]
-        )
+        train_base = datasets.ImageFolder(str(train_dir))
+        train_base.transform = self.train_transform_base
 
-        from engine.augment_utils import AugmentWrapper
+        val_base = datasets.ImageFolder(str(val_dir))
+        val_set = HerringValDataset(val_base, self.metadata, self.val_transform)   # 🟢 ZMIANA: nowy dataset z filtrem 1/2
+
         train_set = AugmentWrapper(
-            base_dataset=train_set,
+            base_dataset=train_base,
             metadata=self.metadata,
             class_counts=self.class_counts,
             max_count=self.max_count,
@@ -176,4 +174,5 @@ class HerringDataset:
             pin_memory=torch.cuda.is_available()
         )
 
-        return train_loader, val_loader, [1, 2]  # 🟢 lista etykiet (tu: [1,2], możesz dodać 0/3 jeśli chcesz)
+        return train_loader, val_loader, train_base.classes
+
