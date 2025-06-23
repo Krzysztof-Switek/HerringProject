@@ -1,7 +1,8 @@
+import numpy as np
 import torch
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
 
-def train_epoch(model, device, dataloader, loss_fn, use_multitask, optimizer, cfg):
+def train_epoch(model, device, dataloader, loss_fn, optimizer):
     model.train()
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
     all_targets, all_preds, all_probs = [], [], []
@@ -22,7 +23,7 @@ def train_epoch(model, device, dataloader, loss_fn, use_multitask, optimizer, cf
         targets_np = targets.cpu().numpy()
 
         stats['loss'] += loss.item()
-        stats['correct'] += (preds == targets_np).sum()
+        stats['correct'] += int(np.sum(preds == targets_np))
         stats['total'] += targets.size(0)
         all_targets.extend(targets_np)
         all_preds.extend(preds)
@@ -46,7 +47,7 @@ def train_epoch(model, device, dataloader, loss_fn, use_multitask, optimizer, cf
     }
 
 
-def validate(model, device, dataloader, loss_fn, use_multitask, cfg):
+def validate(model, device, dataloader, loss_fn):
     model.eval()
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
     all_targets, all_preds, all_probs = [], [], []
@@ -70,7 +71,7 @@ def validate(model, device, dataloader, loss_fn, use_multitask, cfg):
             preds = logits.argmax(dim=1).cpu().numpy()
             targets_np = targets.cpu().numpy()
 
-            stats['correct'] += (preds == targets_np).sum()
+            stats['correct'] += int(np.sum(preds == targets_np))
             stats['total'] += targets.size(0)
             all_targets.extend(targets_np)
             all_preds.extend(preds)

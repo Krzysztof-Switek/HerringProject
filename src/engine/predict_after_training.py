@@ -6,7 +6,7 @@ from torchvision import transforms
 from models.model import HerringModel
 from models.multitask_model import MultiTaskHerringModel
 
-def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager):
+def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, log_dir, full_name):
     cfg = path_manager.cfg
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -84,7 +84,7 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager):
     df[pred_column] = pred_classes
     df[prob_column] = pred_probs
 
-    output_path = path_manager.excel_predictions_output()
+    output_path = log_dir / f"{full_name}_predictions.xlsx"
     if output_path.exists():
         existing_df = pd.read_excel(output_path)
         existing_df = existing_df.drop(columns=[pred_column, prob_column], errors='ignore')

@@ -4,8 +4,8 @@ from datetime import datetime
 from pathlib import Path
 
 
-def init_metrics_logger(trainer, log_dir):
-    metrics_file_path = log_dir / "training_metrics.csv"
+def init_metrics_logger(trainer, log_dir, full_name):
+    metrics_file_path = log_dir / f"{full_name}_training_metrics.csv"
     trainer.metrics_file = open(metrics_file_path, mode="w", newline="")
     trainer.metrics_writer = csv.writer(trainer.metrics_file)
     trainer.metrics_writer.writerow([
@@ -56,15 +56,14 @@ def get_class_distribution(targets):
     return class_dist.get(0, 0), class_dist.get(1, 0)
 
 
-# 🟢 NOWA FUNKCJA: logowanie augmentacji
-def log_augmentation_summary(augment_applied_dict, model_name, log_dir: Path = None):
+def log_augmentation_summary(augment_applied_dict, full_name, log_dir: Path = None):
     """Zapisuje informacje o augmentacji do pliku CSV w katalogu log_dir (domyślnie results/logs)."""
     if log_dir is None:
         log_dir = Path("results/logs")
 
     log_dir.mkdir(parents=True, exist_ok=True)
     date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    filename = f"augmentation_summary_{model_name}_{date_str}.csv"
+    filename = f"augmentation_summary_{full_name}.csv"
     output_path = log_dir / filename
 
     with open(output_path, mode="w", newline="") as f:

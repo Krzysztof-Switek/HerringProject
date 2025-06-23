@@ -70,9 +70,16 @@ def run_training_loop(trainer):
             optimizer, T_max=trainer.cfg.training.epochs
         )
 
-        timestamp = datetime.now().strftime('%d-%m_%H-%M')
-        log_dir = logs_root / f"{model_name}_{loss_name}_{timestamp}"
-        checkpoint_dir = checkpoint_root / f"{model_name}_{loss_name}_{timestamp}"
+        timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M')
+        if is_multitask:
+            mode_type = "multi"
+        elif getattr(trainer.cfg, "expert_model", {}).get("use", False):
+            mode_type = "expert"
+        else:
+            mode_type = "basic"
+        full_name = f"{model_name}_{loss_name}_{mode_type}_{timestamp}"
+        log_dir = logs_root / full_name
+        checkpoint_dir = checkpoint_root / full_name
         log_dir.mkdir(parents=True, exist_ok=True)
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
@@ -82,7 +89,7 @@ def run_training_loop(trainer):
         trainer.early_stop_counter = 0
         trainer.best_cm = None
 
-        init_metrics_logger(trainer, log_dir)
+        init_metrics_logger(trainer, log_dir, full_name)
 
         for epoch in range(trainer.cfg.training.epochs):
             start_time = time.time()
@@ -92,18 +99,14 @@ def run_training_loop(trainer):
                 device=trainer.device,
                 dataloader=train_loader,
                 loss_fn=loss_fn,
-                use_multitask=is_multitask,
-                optimizer=optimizer,
-                cfg=trainer.cfg
+                optimizer=optimizer
             )
 
             val_metrics = validate(
                 model=trainer.model,
                 device=trainer.device,
                 dataloader=val_loader,
-                loss_fn=loss_fn,
-                use_multitask=is_multitask,
-                cfg=trainer.cfg
+                loss_fn=loss_fn
             )
 
             epoch_time = time.time() - start_time
@@ -114,8 +117,7 @@ def run_training_loop(trainer):
                 loss_name,
                 train_metrics,
                 val_metrics,
-                epoch_time,
-                use_multitask=is_multitask
+                epoch_time
             )
 
             val_acc = val_metrics["acc"]
@@ -149,12 +151,13 @@ def run_training_loop(trainer):
         if trainer.last_model_path is not None:
             print(f"🔍 Uruchamianie predykcji dla {loss_name} na całym zbiorze...")
             from .trainer_logger import log_augmentation_summary
-            log_augmentation_summary(trainer.data_loader.augment_applied, model_name)
+            log_augmentation_summary(trainer.data_loader.augment_applied, full_name, log_dir=log_dir)
             run_full_dataset_prediction(
                 loss_name=loss_name,
                 model_path=str(trainer.last_model_path),
                 path_manager=trainer.path_manager,
-                use_multitask=is_multitask
+                log_dir=log_dir,
+                full_name=full_name
             )
         else:
             print(f"⚠️ Brak zapisanego modelu dla {loss_name}, predykcja pominięta.")

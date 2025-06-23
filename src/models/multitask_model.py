@@ -91,7 +91,7 @@ class MultiTaskHerringModel(nn.Module):
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
         print("\n" + "=" * 50)
         print(f"[MultiTask Model] initialized on device: {self.device}")
-        print(f"Architecture: {self.cfg.model_name}")  # 🔧
+        print(f"Architecture: {self.cfg.model_name}")
         print(f"Total parameters: {total_params:,}")
         print(f"Trainable parameters: {trainable_params:,}")
         print(f"Pretrained weights: {self.cfg.pretrained}")
