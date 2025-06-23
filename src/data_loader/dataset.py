@@ -10,28 +10,27 @@ from utils.path_manager import PathManager
 from engine.augment_utils import AugmentWrapper
 from PIL import Image
 
-# Klasa walidacyjna, zwraca (obraz, label, meta)
+# Klasa walidacyjna zwraca (obraz, label, meta)
 class HerringValDataset(Dataset):
     def __init__(self, image_folder, metadata, transform, active_populations):  # 🟢 ZMIANA
         self.image_folder = image_folder
         self.metadata = metadata
         self.transform = transform
-        self.active_populations = list(active_populations)  # 🟢 ZMIANA
+        self.active_populations = list(active_populations)
 
         #  FILTRUJ tylko populacje z configa
         self.valid_indices = [
             idx for idx, (path, label) in enumerate(self.image_folder.imgs)
             if self._is_valid(path)
         ]
-        print(f"DEBUG [dataset] valid_indices length: {len(self.valid_indices)}")
-        print(f"DEBUG [dataset] first 5 valid indices: {self.valid_indices[:5]}")
+
 
     def _is_valid(self, path):
         fname = os.path.basename(path).strip().lower()
         meta = self.metadata.get(fname, (-9, -9))
         pop = meta[0]
         print(f"DEBUG [dataset::_is_valid] path: {path}, fname: {fname}, meta: {meta}, pop: {pop}, active_populations: {self.active_populations}")
-        return pop in self.active_populations  # 🟢 ZMIANA
+        return pop in self.active_populations
 
     def __len__(self):
         return len(self.valid_indices)
@@ -156,7 +155,7 @@ class HerringDataset:
         train_base.transform = self.train_transform_base
 
         val_base = datasets.ImageFolder(str(val_dir))
-        val_set = HerringValDataset(val_base, self.metadata, self.val_transform, self.active_populations)  # 🟢 ZMIANA
+        val_set = HerringValDataset(val_base, self.metadata, self.val_transform, self.active_populations)
 
         train_set = AugmentWrapper(
             base_dataset=train_base,
@@ -166,7 +165,7 @@ class HerringDataset:
             transform_base=self.train_transform_base,
             transform_strong=self.train_transform_strong,
             augment_applied=self.augment_applied,
-            active_populations=self.active_populations,   # 🟢 ZMIANA
+            active_populations=self.active_populations,
         )
 
         train_loader = DataLoader(
@@ -190,6 +189,6 @@ class HerringDataset:
         for _, label, meta in train_loader.dataset:
             debug_labels.append(meta['populacja'])
         from collections import Counter as Cnt
-        print("🟠 DEBUG: Rozkład populacji w train_loader:", dict(Cnt(debug_labels)))  # 🟠 DEBUG
+        print("🟠 DEBUG: Rozkład populacji w train_loader:", dict(Cnt(debug_labels)))
 
         return train_loader, val_loader, train_base.classes
