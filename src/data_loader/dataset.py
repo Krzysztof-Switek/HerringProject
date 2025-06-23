@@ -197,7 +197,12 @@ class HerringDataset:
         for batch in train_loader:
             imgs, labels, metas = batch
             print("labels (ImageFolder):", labels[:10])
-            print("meta['populacja']:", [m['populacja'] for m in metas[:10]])
+            print("type(metas):", type(metas))
+            print("Przykładowy meta:", metas)
+            if isinstance(metas, list) or isinstance(metas, tuple):
+                print("meta['populacja']:", [m['populacja'] for m in metas[:10]])
+            else:
+                print("meta['populacja'] (pojedynczy obiekt):", metas.get('populacja', 'brak'))
             break  # tylko jeden batch!
 
         # 🟠 DEBUG: liczność etykiet w train_loader
