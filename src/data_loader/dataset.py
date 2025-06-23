@@ -16,12 +16,24 @@ class HerringValDataset(Dataset):
         self.image_folder = image_folder
         self.metadata = metadata
         self.transform = transform
+        # 🟢 ZMIANA: Filtrowanie tylko tych indeksów, które mają Populację 1 lub 2
+        self.valid_indices = [
+            idx for idx, (path, label) in enumerate(self.image_folder.imgs)
+            if self._is_valid(path)
+        ]
+
+    def _is_valid(self, path):
+        fname = os.path.basename(path).strip().lower()
+        meta = self.metadata.get(fname, (-1, -9))
+        pop = meta[0]
+        return pop in [1, 2]
 
     def __len__(self):
-        return len(self.image_folder)
+        return len(self.valid_indices)  # 🟢 ZMIANA
 
     def __getitem__(self, idx):
-        path, label = self.image_folder.imgs[idx]
+        real_idx = self.valid_indices[idx]  # 🟢 ZMIANA
+        path, label = self.image_folder.imgs[real_idx]
         image = Image.open(path).convert("RGB")
         img_tensor = self.transform(image)
         filename = os.path.basename(path).strip().lower()
@@ -53,6 +65,7 @@ class HerringDataset:
         if not all(col in df.columns for col in ["FileName", "Populacja", "Wiek"]):
             raise ValueError("Plik Excel musi zawierać kolumny: 'FileName', 'Populacja', 'Wiek'.")
 
+        # Filtrujemy tylko populacje 1 i 2
         df = df[df["Populacja"].isin([1, 2])].copy()
         df["Wiek"] = df["Wiek"].fillna(-9).astype(int)
         df["Populacja"] = df["Populacja"].astype(int)
