@@ -18,7 +18,7 @@ class MultiTaskHerringModel(nn.Module):
         clf_cfg = config.multitask_model.classifier_head  # 🔧
         self.classifier_head = nn.Sequential(
             nn.Dropout(p=clf_cfg.dropout_rate),
-            nn.Linear(num_features, self.full_cfg.data.num_classes)
+            nn.Linear(num_features, len(self.full_cfg.data.active_populations))
         )
 
         # Głowa regresji wieku

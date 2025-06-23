@@ -63,14 +63,14 @@ class HerringModel(nn.Module):
             num_features = original[-1].in_features
             new_classifier = nn.Sequential(
                 nn.Dropout(p=dropout_p),
-                nn.Linear(num_features, self.full_cfg.data.num_classes)
+                nn.Linear(num_features, len(self.full_cfg.data.active_populations))
             )
             original[-1] = new_classifier
         else:
             num_features = original.in_features
             setattr(parent, last, nn.Sequential(
                 nn.Dropout(p=dropout_p),
-                nn.Linear(num_features, self.full_cfg.data.num_classes)
+                nn.Linear(num_features, len(self.full_cfg.data.active_populations))
             ))
 
         return model
