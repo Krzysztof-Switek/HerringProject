@@ -24,6 +24,29 @@ expert_model:
   dropout_rate: 0.3
   weight_decay: 0.01
 
+multitask_model:
+  use: true                         # Czy używać multitaskingu
+  backbone_model:                  # ARCHITEKTURA BACKBONE
+    model_name: "resnet50"
+    image_size: 224
+    pretrained: true
+    freeze_encoder: false
+    dropout_rate: 0.5
+    weight_decay: 0.01
+  classifier_head:
+    type: "linear"                  # Typ głowy klasyfikacyjnej
+    dropout_rate: 0.5
+  regression_head:
+    type: "mlp"                     # Typ głowy regresyjnej
+    hidden_dim: 128
+    dropout_rate: 0.3
+  loss_weighting:
+    method: "uncertainty"          # "static", "uncertainty", "gradnorm", "none"
+    static:
+      classification: 1.0
+      age: 0.3
+  log_loss_components: true
+
 augmentation:
   rotation: 30
   crop_scale: [0.8, 1.0]

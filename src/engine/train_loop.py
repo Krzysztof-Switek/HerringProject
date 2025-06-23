@@ -1,47 +1,58 @@
 import torch
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
 
-def train_epoch(model, device, train_loader, optimizer, loss_fn):
+def train_epoch(model, device, dataloader, loss_fn, use_multitask, optimizer, cfg):
     model.train()
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
     all_targets, all_preds, all_probs = [], [], []
 
-    for inputs, targets, meta in train_loader:
+    for inputs, targets, meta in dataloader:
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
         outputs = model(inputs)
+
         loss = loss_fn(outputs, targets, meta)
         loss.backward()
         optimizer.step()
 
-        stats['loss'] += loss.item()
-        probs = torch.softmax(outputs, dim=1)[:, 1].detach().cpu().numpy()
-        preds = outputs.argmax(dim=1).detach().cpu().numpy()
+        # Obsługa klasyfikacji
+        logits = outputs[0] if isinstance(outputs, tuple) else outputs
+        probs = torch.softmax(logits, dim=1)[:, 1].detach().cpu().numpy()
+        preds = logits.argmax(dim=1).detach().cpu().numpy()
         targets_np = targets.cpu().numpy()
 
+        stats['loss'] += loss.item()
         stats['correct'] += (preds == targets_np).sum()
         stats['total'] += targets.size(0)
         all_targets.extend(targets_np)
         all_preds.extend(preds)
         all_probs.extend(probs)
 
-    loss = stats['loss'] / len(train_loader)
+    loss = stats['loss'] / len(dataloader)
     acc = 100. * stats['correct'] / stats['total']
-    precision = precision_score(all_targets, all_preds)
-    recall = recall_score(all_targets, all_preds)
-    f1 = f1_score(all_targets, all_preds)
+    precision = precision_score(all_targets, all_preds, zero_division=0)
+    recall = recall_score(all_targets, all_preds, zero_division=0)
+    f1 = f1_score(all_targets, all_preds, zero_division=0)
     auc = roc_auc_score(all_targets, all_probs)
 
-    return loss, acc, precision, recall, f1, auc, all_targets
+    return {
+        "loss": loss,
+        "acc": acc,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "auc": auc,
+        "targets": all_targets
+    }
 
 
-def validate(model, device, val_loader, loss_fn):
+def validate(model, device, dataloader, loss_fn, use_multitask, cfg):
     model.eval()
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
     all_targets, all_preds, all_probs = [], [], []
 
     with torch.no_grad():
-        for batch in val_loader:
+        for batch in dataloader:
             if len(batch) == 3:
                 inputs, targets, meta = batch
             else:
@@ -50,11 +61,13 @@ def validate(model, device, val_loader, loss_fn):
 
             inputs, targets = inputs.to(device), targets.to(device)
             outputs = model(inputs)
+
             loss = loss_fn(outputs, targets, meta)
             stats['loss'] += loss.item()
 
-            probs = torch.softmax(outputs, dim=1)[:, 1].cpu().numpy()
-            preds = outputs.argmax(dim=1).cpu().numpy()
+            logits = outputs[0] if isinstance(outputs, tuple) else outputs
+            probs = torch.softmax(logits, dim=1)[:, 1].cpu().numpy()
+            preds = logits.argmax(dim=1).cpu().numpy()
             targets_np = targets.cpu().numpy()
 
             stats['correct'] += (preds == targets_np).sum()
@@ -63,12 +76,21 @@ def validate(model, device, val_loader, loss_fn):
             all_preds.extend(preds)
             all_probs.extend(probs)
 
-    loss = stats['loss'] / len(val_loader)
+    loss = stats['loss'] / len(dataloader)
     acc = 100. * stats['correct'] / stats['total']
-    precision = precision_score(all_targets, all_preds)
-    recall = recall_score(all_targets, all_preds)
-    f1 = f1_score(all_targets, all_preds)
+    precision = precision_score(all_targets, all_preds, zero_division=0)
+    recall = recall_score(all_targets, all_preds, zero_division=0)
+    f1 = f1_score(all_targets, all_preds, zero_division=0)
     auc = roc_auc_score(all_targets, all_probs)
     cm = confusion_matrix(all_targets, all_preds)
 
-    return loss, acc, precision, recall, f1, auc, cm, all_targets
+    return {
+        "loss": loss,
+        "acc": acc,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "auc": auc,
+        "cm": cm,
+        "targets": all_targets
+    }

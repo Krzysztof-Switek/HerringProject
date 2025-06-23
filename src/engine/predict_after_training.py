@@ -4,13 +4,21 @@ import torch
 import torch.nn.functional as F
 from torchvision import transforms
 from models.model import HerringModel
+from models.multitask_model import MultiTaskHerringModel
 
 def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager):
     cfg = path_manager.cfg
-
-    # Przygotowanie modelu
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = HerringModel(cfg).to(device)
+
+    # Wybór odpowiedniego modelu
+    if getattr(cfg, "multitask_model", {}).get("use", False):
+        model = MultiTaskHerringModel(cfg).to(device)
+        is_multitask = True
+    else:
+        model = HerringModel(cfg).to(device)
+        is_multitask = False
+
+    # Wczytanie wag
     checkpoint = torch.load(model_path, map_location=device)
     if 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -18,14 +26,13 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager):
         model.load_state_dict(checkpoint)
     model.eval()
 
-    # Transformacja obrazu
+    # Transformacja
     transform = transforms.Compose([
         transforms.Resize(cfg.base_model.image_size),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-    # Wczytanie Excela
     excel_path = path_manager.metadata_file()
     df = pd.read_excel(excel_path)
     if "FilePath" not in df.columns:
@@ -42,6 +49,7 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager):
     predictions = {}
     total = len(all_image_paths)
     print(f"\n🔍 Start predykcji ({loss_name}) na {total} obrazach...")
+
     for i, image_path in enumerate(all_image_paths, 1):
         try:
             if i % 100 == 0 or i == total:
@@ -50,6 +58,8 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager):
             input_tensor = transform(image).unsqueeze(0).to(device)
             with torch.no_grad():
                 output = model(input_tensor)
+                if is_multitask:
+                    output = output[0]  # klasyfikacja (pomijamy predykcję wieku)
                 probs = F.softmax(output, dim=1)[0]
                 pred_class = output.argmax().item() + 1
                 confidence = float(probs[pred_class - 1]) * 100
@@ -58,7 +68,7 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager):
         except Exception as e:
             print(f"Błąd przetwarzania obrazu {image_path}: {e}")
 
-    # Kolumny predykcji
+    # Zapis predykcji
     pred_column = f"{loss_name}_pred"
     prob_column = f"{loss_name}_prob"
     pred_classes, pred_probs, not_found = [], [], []
@@ -74,7 +84,6 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager):
     df[pred_column] = pred_classes
     df[prob_column] = pred_probs
 
-    # Zapis do pliku wynikowego
     output_path = path_manager.excel_predictions_output()
     if output_path.exists():
         existing_df = pd.read_excel(output_path)

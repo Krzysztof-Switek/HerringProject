@@ -1,7 +1,7 @@
+import torch
 import torch.nn as nn
 from torchvision import models
 from omegaconf import DictConfig
-import torch
 import warnings
 
 class HerringModel(nn.Module):
@@ -14,8 +14,6 @@ class HerringModel(nn.Module):
         self._print_model_info()
 
     def _init_base_model(self) -> nn.Module:
-        """Initialize base model with automatic device placement"""
-        # Model-specific configurations
         model_config = {
             "resnet50": {"image_size": 224, "classifier": "fc"},
             "convnext_large": {"image_size": 384, "classifier": "classifier"},
@@ -25,10 +23,9 @@ class HerringModel(nn.Module):
         }
 
         if self.cfg.base_model not in model_config:
-            available_models = list(model_config.keys())
-            raise ValueError(f"Model {self.cfg.base_model} not configured. Choose from: {available_models}")
+            available = list(model_config.keys())
+            raise ValueError(f"Model {self.cfg.base_model} not configured. Choose from: {available}")
 
-        # Handle weights
         weights = None
         if self.cfg.pretrained:
             if self.cfg.base_model == "resnet50":
@@ -45,39 +42,33 @@ class HerringModel(nn.Module):
                 warnings.warn(f"No weights enum for {self.cfg.base_model}, using default initialization")
                 weights = "DEFAULT"
 
-        # Initialize model
         model = getattr(models, self.cfg.base_model)(weights=weights)
 
-        # (zamraża encoder, nie klasyfikator)
         if self.cfg.freeze_encoder:
             for name, param in model.named_parameters():
                 if not any(c in name.lower() for c in ['fc', 'classifier', 'head']):
                     param.requires_grad = False
 
-        # Modify the classifier to match the number of classes
         dropout_p = getattr(self.cfg, "dropout_rate", 0.0)
         classifier_path = model_config[self.cfg.base_model]["classifier"].split('.')
 
-        # Navigate to the classifier layer
-        parent_module = model
+        parent = model
         for part in classifier_path[:-1]:
-            parent_module = getattr(parent_module, part)
+            parent = getattr(parent, part)
 
-        last_part = classifier_path[-1]
-        original_classifier = getattr(parent_module, last_part)
+        last = classifier_path[-1]
+        original = getattr(parent, last)
 
-        if isinstance(original_classifier, nn.Sequential):
-            # For sequential classifiers (like in ConvNeXt)
-            num_features = original_classifier[-1].in_features
+        if isinstance(original, nn.Sequential):
+            num_features = original[-1].in_features
             new_classifier = nn.Sequential(
                 nn.Dropout(p=dropout_p),
                 nn.Linear(num_features, self.full_cfg.data.num_classes)
             )
-            original_classifier[-1] = new_classifier
+            original[-1] = new_classifier
         else:
-            # For simple linear classifiers
-            num_features = original_classifier.in_features
-            setattr(parent_module, last_part, nn.Sequential(
+            num_features = original.in_features
+            setattr(parent, last, nn.Sequential(
                 nn.Dropout(p=dropout_p),
                 nn.Linear(num_features, self.full_cfg.data.num_classes)
             ))
@@ -85,15 +76,13 @@ class HerringModel(nn.Module):
         return model
 
     def _print_model_info(self):
-        """Print detailed model information"""
-        trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
-        total_params = sum(p.numel() for p in self.parameters())
-
+        trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        total = sum(p.numel() for p in self.parameters())
         print("\n" + "=" * 50)
         print(f"Model initialized on device: {self.device}")
         print(f"Architecture: {self.cfg.base_model}")
-        print(f"Total parameters: {total_params:,}")
-        print(f"Trainable parameters: {trainable_params:,}")
+        print(f"Total parameters: {total:,}")
+        print(f"Trainable parameters: {trainable:,}")
         print(f"Pretrained weights: {self.cfg.pretrained}")
         print(f"Frozen encoder: {self.cfg.freeze_encoder}")
         print(f"Dropout rate: {getattr(self.cfg, 'dropout_rate', 0.0)}")
@@ -103,3 +92,9 @@ class HerringModel(nn.Module):
         if x.device != self.device:
             x = x.to(self.device)
         return self.base(x)
+
+def build_model(cfg: DictConfig) -> nn.Module:
+    if cfg.multitask_model.use:
+        from models.multitask_model import MultiTaskHerringModel
+        return MultiTaskHerringModel(cfg)
+    return HerringModel(cfg)

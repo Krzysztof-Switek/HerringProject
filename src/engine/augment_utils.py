@@ -21,7 +21,7 @@ class AugmentWrapper(torch.utils.data.Dataset):
         path, label = self.base_dataset.samples[index]
         image = self.base_dataset.loader(path)
 
-        fname = os.path.basename(path).strip().replace(" ", "_").lower()
+        fname = os.path.basename(path).strip().lower()
 
         if fname not in self.metadata:
             print(f"⚠️ Nie znaleziono metadanych dla pliku: {fname}")

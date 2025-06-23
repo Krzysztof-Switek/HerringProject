@@ -4,6 +4,10 @@ import torch.nn.functional as F
 from collections import Counter
 
 
+class BaseMultitaskLossWrapper(nn.Module):
+    def unwrap_logits(self, outputs):
+        return outputs[0] if isinstance(outputs, tuple) else outputs
+
 
 class LossFactory:
     def __init__(self, loss_type: str, **kwargs):
@@ -35,16 +39,17 @@ class LossFactory:
             raise ValueError(f"Nieznany typ funkcji straty: {self.loss_type}")
 
 
-class StandardCrossEntropy(nn.Module):
+class StandardCrossEntropy(BaseMultitaskLossWrapper):
     def __init__(self):
         super().__init__()
         self.loss_fn = nn.CrossEntropyLoss()
 
     def forward(self, outputs, targets, meta=None):
+        outputs = self.unwrap_logits(outputs)
         return self.loss_fn(outputs, targets)
 
 
-class SampleWeightedCrossEntropy(nn.Module):
+class SampleWeightedCrossEntropy(BaseMultitaskLossWrapper):
     def __init__(self):
         super().__init__()
         self.weight_map = None
@@ -57,6 +62,7 @@ class SampleWeightedCrossEntropy(nn.Module):
         self.weight_map = {k: v / mean_weight for k, v in raw_map.items()}
 
     def forward(self, outputs, targets, meta=None):
+        outputs = self.unwrap_logits(outputs)
         loss = F.cross_entropy(outputs, targets, reduction='none')
 
         if meta is None:
@@ -72,11 +78,12 @@ class SampleWeightedCrossEntropy(nn.Module):
         return (loss * weights).mean()
 
 
-class WeightedAgeCrossEntropy(nn.Module):
+class WeightedAgeCrossEntropy(BaseMultitaskLossWrapper):
     def __init__(self):
         super().__init__()
 
     def forward(self, outputs, targets, meta=None):
+        outputs = self.unwrap_logits(outputs)
         loss = F.cross_entropy(outputs, targets, reduction='none')
         if meta is None:
             return loss.mean()
@@ -92,12 +99,13 @@ class WeightedAgeCrossEntropy(nn.Module):
         return (loss * weights).mean()
 
 
-class FocalLossWithAgeBoost(nn.Module):
+class FocalLossWithAgeBoost(BaseMultitaskLossWrapper):
     def __init__(self, gamma=2.0):
         super().__init__()
         self.gamma = gamma
 
     def forward(self, outputs, targets, meta=None):
+        outputs = self.unwrap_logits(outputs)
         log_probs = F.log_softmax(outputs, dim=1)
         probs = torch.exp(log_probs)
         targets_onehot = F.one_hot(targets, num_classes=outputs.size(1)).float()
@@ -113,7 +121,7 @@ class FocalLossWithAgeBoost(nn.Module):
         return loss.mean()
 
 
-class LDAMLoss(nn.Module):
+class LDAMLoss(BaseMultitaskLossWrapper):
     def __init__(self, class_counts, max_m=0.5, s=30):
         super().__init__()
         m_list = 1.0 / torch.sqrt(torch.sqrt(torch.tensor(class_counts).float() + 1e-8))
@@ -122,6 +130,7 @@ class LDAMLoss(nn.Module):
         self.s = s
 
     def forward(self, outputs, targets, meta=None):
+        outputs = self.unwrap_logits(outputs)
         index = torch.zeros_like(outputs, dtype=torch.bool)
         index.scatter_(1, targets.data.view(-1, 1), 1)
         batch_m = torch.zeros_like(outputs).to(outputs.device)
@@ -130,13 +139,14 @@ class LDAMLoss(nn.Module):
         return F.cross_entropy(self.s * outputs_m, targets)
 
 
-class AsymmetricFocalLoss(nn.Module):
+class AsymmetricFocalLoss(BaseMultitaskLossWrapper):
     def __init__(self, gamma_pos=0.0, gamma_neg=2.0):
         super().__init__()
         self.gamma_pos = gamma_pos
         self.gamma_neg = gamma_neg
 
     def forward(self, outputs, targets, meta=None):
+        outputs = self.unwrap_logits(outputs)
         log_probs = F.log_softmax(outputs, dim=1)
         probs = torch.exp(log_probs)
         targets_onehot = F.one_hot(targets, num_classes=outputs.size(1)).float()
@@ -146,7 +156,7 @@ class AsymmetricFocalLoss(nn.Module):
         return loss.mean()
 
 
-class ClassBalancedFocalLoss(nn.Module):
+class ClassBalancedFocalLoss(BaseMultitaskLossWrapper):
     def __init__(self, class_freq: dict, beta=0.999, gamma=2.0):
         super().__init__()
         self.class_freq = class_freq
@@ -158,15 +168,15 @@ class ClassBalancedFocalLoss(nn.Module):
         weights = {}
         all_classes = list(range(max(self.class_freq.keys()) + 1))
         for cls in all_classes:
-            n = self.class_freq.get(cls, 1)  # domyślnie 1, żeby nie dzielić przez zero
+            n = self.class_freq.get(cls, 1)
             effective_num = 1.0 - self.beta ** n
             weight = (1.0 - self.beta) / (effective_num + 1e-8)
             weights[cls] = weight
         total = sum(weights.values())
         return {cls: w / total for cls, w in weights.items()}
 
-
     def forward(self, outputs, targets, meta=None):
+        outputs = self.unwrap_logits(outputs)
         log_probs = F.log_softmax(outputs, dim=1)
         probs = torch.exp(log_probs)
         targets_onehot = F.one_hot(targets, num_classes=outputs.size(1)).float()
@@ -176,7 +186,7 @@ class ClassBalancedFocalLoss(nn.Module):
         return -(focal_weight * class_weights * torch.log(pt + 1e-8)).mean()
 
 
-class FocalTverskyLoss(nn.Module):
+class FocalTverskyLoss(BaseMultitaskLossWrapper):
     def __init__(self, alpha=0.7, beta=0.3, gamma=0.75):
         super().__init__()
         self.alpha = alpha
@@ -184,6 +194,7 @@ class FocalTverskyLoss(nn.Module):
         self.gamma = gamma
 
     def forward(self, outputs, targets, meta=None):
+        outputs = self.unwrap_logits(outputs)
         targets_onehot = F.one_hot(targets, num_classes=outputs.size(1)).float()
         probs = F.softmax(outputs, dim=1)
         TP = (probs * targets_onehot).sum(dim=0)
@@ -194,7 +205,7 @@ class FocalTverskyLoss(nn.Module):
         return loss.mean()
 
 
-class GHMLoss(nn.Module):
+class GHMLoss(BaseMultitaskLossWrapper):
     def __init__(self, bins=10, momentum=0.75):
         super().__init__()
         self.bins = bins
@@ -203,6 +214,7 @@ class GHMLoss(nn.Module):
         self.acc_sum = torch.zeros(bins)
 
     def forward(self, outputs, targets, meta=None):
+        outputs = self.unwrap_logits(outputs)
         g = torch.abs(F.softmax(outputs, dim=1) - F.one_hot(targets, num_classes=outputs.size(1)).float()).sum(dim=1)
         total = outputs.size(0)
         weights = torch.zeros_like(g)
@@ -216,14 +228,87 @@ class GHMLoss(nn.Module):
         return (loss * weights).mean()
 
 
-class SeesawLoss(nn.Module):
+class SeesawLoss(BaseMultitaskLossWrapper):
     def __init__(self, class_counts, p=0.8):
         super().__init__()
         self.class_counts = torch.tensor(class_counts).float()
         self.p = p
 
     def forward(self, outputs, targets, meta=None):
+        outputs = self.unwrap_logits(outputs)
         logits = F.log_softmax(outputs, dim=1)
         bias_weights = self.class_counts[targets] ** self.p
         loss = -logits[range(len(targets)), targets] * bias_weights.to(outputs.device)
         return loss.mean()
+
+class MultiTaskLossWrapper(nn.Module):
+    def __init__(self, classification_loss, regression_loss, method="none", static_weights=None):
+        super().__init__()
+        self.classification_loss = classification_loss
+        self.regression_loss = regression_loss
+        self.method = method
+
+        if method == "uncertainty":
+            self.log_vars = nn.Parameter(torch.zeros(2))  # log(sigma^2) dla każdej taski
+        elif method == "static":
+            if static_weights is None:
+                raise ValueError("Wymagane static_weights, jeśli metoda to 'static'")
+            self.static_weights = static_weights
+        elif method == "gradnorm":
+            self.alpha = 1.5  # zalecane w GradNorm
+            self.initial_losses = None  # zostanie ustalone po 1 ep.
+            self.weights = nn.Parameter(torch.ones(2))  # wagi do optymalizacji
+        elif method == "none":
+            pass
+        else:
+            raise NotImplementedError(f"Obsługa wag {self.method} jeszcze niezaimplementowana")
+
+    def forward(self, outputs, targets, meta):
+        logits, age_pred = outputs
+        cls_loss = self.classification_loss(logits, targets, meta)
+        reg_loss = self.regression_loss(age_pred.squeeze(), meta['wiek'].float())
+
+        if self.method == "uncertainty":
+            precision_cls = torch.exp(-self.log_vars[0])
+            precision_reg = torch.exp(-self.log_vars[1])
+            loss = precision_cls * cls_loss + self.log_vars[0] + precision_reg * reg_loss + self.log_vars[1]
+            return loss
+
+        elif self.method == "static":
+            return self.static_weights['classification'] * cls_loss + \
+                   self.static_weights['age'] * reg_loss
+
+        elif self.method == "gradnorm":
+            # Ustal straty z początku (1 epoka)
+            if self.initial_losses is None:
+                self.initial_losses = (cls_loss.detach(), reg_loss.detach())
+
+            # Oblicz gradienty względem shared weights
+            self.weights = nn.Parameter(F.relu(self.weights))
+            loss_vec = torch.stack([cls_loss, reg_loss])
+            weighted_loss = torch.sum(self.weights * loss_vec)
+            weighted_loss.backward(retain_graph=True)
+
+            # Oblicz gradienty normy
+            grads = []
+            for i, l in enumerate([cls_loss, reg_loss]):
+                grad = torch.autograd.grad(l, self.weights, retain_graph=True, allow_unused=True)[0]
+                grads.append(torch.norm(grad))
+
+            # Oblicz współczynnik skalowania
+            avg_loss_ratio = torch.tensor([
+                (cls_loss / self.initial_losses[0]).item(),
+                (reg_loss / self.initial_losses[1]).item()
+            ])
+            avg_grad = sum(grads) / 2
+            target_grads = self.alpha * avg_loss_ratio * avg_grad
+
+            loss_gradnorm = torch.sum(torch.abs(grads - target_grads.detach()))
+            return weighted_loss + loss_gradnorm
+
+        elif self.method == "none":
+            return cls_loss + reg_loss
+
+        else:
+            raise NotImplementedError(f"Obsługa wag {self.method} jeszcze niezaimplementowana")
+

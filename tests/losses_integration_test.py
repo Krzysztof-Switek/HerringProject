@@ -41,19 +41,18 @@ def cfg():
 ])
 def test_loss_integration_with_model(cfg, loss_fn):
     torch.manual_seed(0)
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Model
     model = HerringModel(cfg).to(device)
     model.train()
 
-    # Dane
+    # 🔧 ZMIANA: użyj poprawnej metody get_loaders()
     dataset = HerringDataset(cfg)
-    dataloader = torch.utils.data.DataLoader(dataset.train_set, batch_size=4, shuffle=True)
+    train_loader, _, _ = dataset.get_loaders()  # 🔧 ZMIANA
 
     # Pojedynczy batch
-    inputs, targets, meta = next(iter(dataloader))
+    inputs, targets, meta = next(iter(train_loader))
     inputs, targets = inputs.to(device), targets.to(device)
     for key in meta:
         meta[key] = meta[key].to(device)
@@ -65,5 +64,5 @@ def test_loss_integration_with_model(cfg, loss_fn):
     assert not torch.isnan(loss), f"{loss_fn.__class__.__name__} zwrócił NaN"
     assert not torch.isinf(loss), f"{loss_fn.__class__.__name__} zwrócił Inf"
 
-    loss.backward()  # Gradienty
+    loss.backward()
     print(f"{loss_fn.__class__.__name__}: OK, loss = {loss.item():.4f}")

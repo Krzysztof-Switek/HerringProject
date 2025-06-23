@@ -25,7 +25,6 @@ class HerringDataset:
         print(f"\n📊 Największa liczność klas (populacja, wiek): {self.max_count}")
         self._validate_labels()
 
-
     def _load_metadata(self):
         excel_path = self.path_manager.metadata_file()
         if not excel_path.exists():
@@ -50,18 +49,26 @@ class HerringDataset:
             counter[(pop, wiek)] += 1
         return counter
 
+    # 🔧 NOWA METODA – dynamiczny wybór image_size
+    def _get_image_size(self):
+        if self.cfg.get("multitask_model") and self.cfg.multitask_model.use:
+            return self.cfg.multitask_model.backbone_model.image_size
+        return self.cfg.base_model.image_size
+
     def _get_base_transforms(self):
+        size = self._get_image_size()
         return transforms.Compose([
-            transforms.Resize((self.cfg.base_model.image_size, self.cfg.base_model.image_size)),
+            transforms.Resize((size, size)),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
 
-    def _get_strong_transforms(self):  # 🔧 ZMODYFIKOWANE: korzysta z self.cfg.augmentation
+    def _get_strong_transforms(self):
         aug = self.cfg.augmentation
+        size = self._get_image_size()
         return transforms.Compose([
             transforms.RandomRotation(aug.rotation),
-            transforms.RandomResizedCrop(self.cfg.base_model.image_size, scale=tuple(aug.crop_scale)),
+            transforms.RandomResizedCrop(size, scale=tuple(aug.crop_scale)),
             transforms.RandomHorizontalFlip(p=aug.hflip_prob),
             transforms.RandomVerticalFlip(p=aug.vflip_prob),
             transforms.ColorJitter(
@@ -76,16 +83,17 @@ class HerringDataset:
                 scale=tuple(aug.affine_scale),
                 shear=aug.affine_shear
             ),
-            transforms.Resize((self.cfg.base_model.image_size, self.cfg.base_model.image_size)),
+            transforms.Resize((size, size)),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
             transforms.GaussianBlur(kernel_size=aug.gaussian_blur_kernel)
         ])
 
     def _get_val_transforms(self):
+        size = self._get_image_size()
         return transforms.Compose([
-            transforms.Resize(self.cfg.base_model.image_size),
-            transforms.CenterCrop(self.cfg.base_model.image_size),
+            transforms.Resize(size),
+            transforms.CenterCrop(size),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
@@ -105,6 +113,8 @@ class HerringDataset:
         val_dir = data_root / 'val'
 
         train_base = datasets.ImageFolder(str(train_dir))
+        train_base.transform = self.train_transform_base
+
         val_set = datasets.ImageFolder(str(val_dir), transform=self.val_transform)
 
         train_set = AugmentWrapper(
