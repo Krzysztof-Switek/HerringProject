@@ -23,12 +23,14 @@ class HerringValDataset(Dataset):
             idx for idx, (path, label) in enumerate(self.image_folder.imgs)
             if self._is_valid(path)
         ]
-        print(f"🟠 DEBUG: Val valid_indices length: {len(self.valid_indices)}")  # 🟠 DEBUG
+        print(f"DEBUG [dataset] valid_indices length: {len(self.valid_indices)}")
+        print(f"DEBUG [dataset] first 5 valid indices: {self.valid_indices[:5]}")
 
     def _is_valid(self, path):
         fname = os.path.basename(path).strip().lower()
         meta = self.metadata.get(fname, (-9, -9))
         pop = meta[0]
+        print(f"DEBUG [dataset::_is_valid] path: {path}, fname: {fname}, meta: {meta}, pop: {pop}, active_populations: {self.active_populations}")
         return pop in self.active_populations  # 🟢 ZMIANA
 
     def __len__(self):
