@@ -59,12 +59,15 @@ def save_best_model(trainer, val_acc, val_cm, model_name, loss_name, checkpoint_
 def should_stop_early(trainer):
     return trainer.early_stop_counter >= trainer.cfg.training.early_stopping_patience
 
-def get_class_distribution(targets, class_labels):  # 🟢 ZMIANA: przyjmij class_labels
+def get_class_distribution(targets, class_labels):
     import numpy as np
+    # 🟢 Poprawka: rzutowanie wszystkiego na int (obsługa tensorów i innych typów)
+    targets = [int(t.item()) if hasattr(t, 'item') else int(t) for t in targets]
     values, counts = np.unique(targets, return_counts=True)
     class_dist = {int(v): int(c) for v, c in zip(values, counts)}
-    # 🟢 ZMIANA: zawsze kolejność jak w class_labels
+    # 🟢 Gwarantowana kolejność zgodna z class_labels
     return tuple(class_dist.get(int(lbl), 0) for lbl in class_labels)
+
 
 def log_augmentation_summary(augment_applied_dict, full_name, log_dir: Path = None):
     if log_dir is None:
