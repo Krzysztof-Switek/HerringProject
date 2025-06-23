@@ -10,9 +10,11 @@ from utils.path_manager import PathManager
 from engine.augment_utils import AugmentWrapper
 from PIL import Image
 
+# --- DOTYCHCZASOWY KOD ---
+
 # Klasa walidacyjna zwraca (obraz, label, meta)
 class HerringValDataset(Dataset):
-    def __init__(self, image_folder, metadata, transform, active_populations):  # 🟢 ZMIANA
+    def __init__(self, image_folder, metadata, transform, active_populations):
         self.image_folder = image_folder
         self.metadata = metadata
         self.transform = transform
@@ -23,7 +25,6 @@ class HerringValDataset(Dataset):
             idx for idx, (path, label) in enumerate(self.image_folder.imgs)
             if self._is_valid(path)
         ]
-
 
     def _is_valid(self, path):
         fname = os.path.basename(path).strip().lower()
@@ -55,10 +56,10 @@ class HerringDataset:
         self.class_counts = self._compute_class_counts()
         self.max_count = max(self.class_counts.values())
         self.augment_applied = defaultdict(int)
-        self.active_populations = list(self.cfg.data.active_populations)  # 🟢 ZMIANA
+        self.active_populations = list(self.cfg.data.active_populations)
 
         print(f"\n📊 Największa liczność klas (populacja, wiek): {self.max_count}")
-        print(f"🟠 DEBUG: Aktywne populacje z configa: {self.active_populations}")  # 🟠 DEBUG
+        print(f"🟠 DEBUG: Aktywne populacje z configa: {self.active_populations}")
         self._validate_labels()
 
     def _load_metadata(self):
@@ -76,6 +77,9 @@ class HerringDataset:
         # 🟠 DEBUG: policz ile rekordów na populację (z excela)
         pop_stats = dict(Counter(df["Populacja"]))
         print(f"🟠 DEBUG: Liczność populacji w Excelu: {pop_stats}")
+
+        # 🟣 DEBUG MAPPING — WYDRUKUJ UNIKALNE POPULACJE Z EXCELA
+        print("🟣 DEBUG MAPPING: Unikalne populacje w Excelu:", sorted(df["Populacja"].unique()))
 
         return {
             str(row["FileName"]).strip().lower(): (int(row["Populacja"]), int(row["Wiek"]))
@@ -140,7 +144,7 @@ class HerringDataset:
         data_root = self.path_manager.data_root()
         train_labels = sorted(os.listdir(data_root / 'train'))
         val_labels = sorted(os.listdir(data_root / 'val'))
-        expected_labels = sorted([str(p) for p in self.active_populations])  # 🟢 ZMIANA
+        expected_labels = sorted([str(p) for p in self.active_populations])
         if train_labels != expected_labels or val_labels != expected_labels:
             raise ValueError(f"Niepoprawne etykiety: {train_labels}, {val_labels}")
         print(f"✔️ Etykiety klas poprawne {expected_labels}")
@@ -182,6 +186,19 @@ class HerringDataset:
             num_workers=0,
             pin_memory=torch.cuda.is_available()
         )
+
+        # 🟣 DEBUG MAPPING — WYDRUKUJ MAPPING IMAGEFOLDER
+        print("\n🟣 DEBUG MAPPING: MAPPING folderów do indeksów klas wg ImageFolder:")
+        for idx, class_name in enumerate(train_base.classes):
+            print(f"Label {idx} = Populacja (nazwa folderu): {class_name}")
+
+        # 🟣 DEBUG MAPPING — WYDRUKUJ PIERWSZY BATCH Z LABELS I META
+        print("\n🟣 DEBUG MAPPING: Przykładowy batch z train_loader (label vs meta['populacja']):")
+        for batch in train_loader:
+            imgs, labels, metas = batch
+            print("labels (ImageFolder):", labels[:10])
+            print("meta['populacja']:", [m['populacja'] for m in metas[:10]])
+            break  # tylko jeden batch!
 
         # 🟠 DEBUG: liczność etykiet w train_loader
         debug_labels = []
