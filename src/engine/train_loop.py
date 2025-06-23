@@ -7,6 +7,13 @@ def train_epoch(model, device, dataloader, loss_fn, optimizer):
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
     all_targets, all_preds, all_probs = [], [], []
 
+    # 🟢 ZMIANA: pobierz klasy z dataloadera, najlepiej z configu
+    class_labels = None
+    if hasattr(dataloader.dataset, 'base_dataset') and hasattr(dataloader.dataset.base_dataset, 'classes'):
+        class_labels = [int(x) for x in dataloader.dataset.base_dataset.classes]
+    elif hasattr(dataloader.dataset, 'classes'):
+        class_labels = [int(x) for x in dataloader.dataset.classes]
+
     for inputs, targets, meta in dataloader:
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
@@ -16,7 +23,6 @@ def train_epoch(model, device, dataloader, loss_fn, optimizer):
         loss.backward()
         optimizer.step()
 
-        # Obsługa klasyfikacji
         logits = outputs[0] if isinstance(outputs, tuple) else outputs
         probs = torch.softmax(logits, dim=1)[:, 1].detach().cpu().numpy()
         preds = logits.argmax(dim=1).detach().cpu().numpy()
@@ -25,9 +31,17 @@ def train_epoch(model, device, dataloader, loss_fn, optimizer):
         stats['loss'] += loss.item()
         stats['correct'] += int(np.sum(preds == targets_np))
         stats['total'] += targets.size(0)
-        all_targets.extend(targets_np)
-        all_preds.extend(preds)
-        all_probs.extend(probs)
+        # 🟢 ZMIANA: filtruj tylko dozwolone klasy
+        if class_labels is not None:
+            for target, pred, prob in zip(targets_np, preds, probs):
+                if int(target) in class_labels:
+                    all_targets.append(int(target))
+                    all_preds.append(int(pred))
+                    all_probs.append(float(prob))
+        else:
+            all_targets.extend(targets_np)
+            all_preds.extend(preds)
+            all_probs.extend(probs)
 
     loss = stats['loss'] / len(dataloader)
     acc = 100. * stats['correct'] / stats['total']
@@ -51,16 +65,21 @@ def validate(model, device, dataloader, loss_fn):
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
     all_targets, all_preds, all_probs = [], [], []
 
+    # 🟢 ZMIANA: pobierz klasy z dataloadera, najlepiej z configu
+    class_labels = None
+    if hasattr(dataloader.dataset, 'base_dataset') and hasattr(dataloader.dataset.base_dataset, 'classes'):
+        class_labels = [int(x) for x in dataloader.dataset.base_dataset.classes]
+    elif hasattr(dataloader.dataset, 'classes'):
+        class_labels = [int(x) for x in dataloader.dataset.classes]
+
     with torch.no_grad():
         for batch in dataloader:
-            # --- ZMIANA START ---
             if len(batch) != 3:
                 raise ValueError(
                     f"Batch walidacyjny musi zawierać 3 elementy: (inputs, targets, meta). "
                     f"Aktualnie: {len(batch)} elementów! Popraw DataLoader dla walidacji."
                 )
             inputs, targets, meta = batch
-            # --- ZMIANA KONIEC ---
 
             inputs, targets = inputs.to(device), targets.to(device)
             outputs = model(inputs)
@@ -75,9 +94,17 @@ def validate(model, device, dataloader, loss_fn):
 
             stats['correct'] += int(np.sum(preds == targets_np))
             stats['total'] += targets.size(0)
-            all_targets.extend(targets_np)
-            all_preds.extend(preds)
-            all_probs.extend(probs)
+            # 🟢 ZMIANA: filtruj tylko dozwolone klasy
+            if class_labels is not None:
+                for target, pred, prob in zip(targets_np, preds, probs):
+                    if int(target) in class_labels:
+                        all_targets.append(int(target))
+                        all_preds.append(int(pred))
+                        all_probs.append(float(prob))
+            else:
+                all_targets.extend(targets_np)
+                all_preds.extend(preds)
+                all_probs.extend(probs)
 
     loss = stats['loss'] / len(dataloader)
     acc = 100. * stats['correct'] / stats['total']

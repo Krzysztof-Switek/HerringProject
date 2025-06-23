@@ -28,7 +28,7 @@ class HerringValDataset(Dataset):
         fname = os.path.basename(path).strip().lower()
         meta = self.metadata.get(fname, (-9, -9))
         pop = meta[0]
-        return pop in self.active_populations  # 🟢 ZMIANA
+        return pop in self.active_populations
 
     def __len__(self):
         return len(self.valid_indices)
@@ -54,7 +54,7 @@ class HerringDataset:
         self.class_counts = self._compute_class_counts()
         self.max_count = max(self.class_counts.values())
         self.augment_applied = defaultdict(int)
-        self.active_populations = list(self.cfg.data.active_populations)  # 🟢 ZMIANA
+        self.active_populations = list(self.cfg.data.active_populations)
 
         print(f"\n📊 Największa liczność klas (populacja, wiek): {self.max_count}")
         self._validate_labels()
