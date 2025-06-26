@@ -162,8 +162,11 @@ class HerringDataset:
         for batch in train_loader:
             imgs, labels, metas = batch
             print("DEBUG batch klasy indeksy (labels):", labels)
-            print("DEBUG batch meta populacje (z excela):", [m['populacja'] for m in metas])
-            print("DEBUG batch meta wiek:", [m['wiek'] for m in metas])
+            if isinstance(metas, dict) and 'populacja' in metas:
+                print("DEBUG batch meta populacje (z excela):", metas['populacja'])
+                print("DEBUG batch meta wiek:", metas['wiek'])
+            else:
+                print("DEBUG batch meta populacje (z excela):", metas)
             print("DEBUG batch klasy biologiczne:", [self.population_mapper.to_pop(idx) for idx in labels])
             break
 
