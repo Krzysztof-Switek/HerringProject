@@ -1,28 +1,24 @@
+# data_loader/dataset.py
+
 import os
 import torch
 import pandas as pd
-from torchvision import transforms, datasets
+from torchvision import transforms
 from torch.utils.data import DataLoader, Dataset
 from collections import Counter, defaultdict
 from omegaconf import DictConfig
 from pathlib import Path
 from utils.path_manager import PathManager
-from engine.augment_utils import AugmentWrapper
 from PIL import Image
 
-# --- DOTYCHCZASOWY KOD ---
-
-# Klasa walidacyjna zwraca (obraz, label, meta)
 class HerringValDataset(Dataset):
     def __init__(self, image_folder, metadata, transform, active_populations):
-        self.image_folder = image_folder
+        self.image_folder = image_folder  # ImageFolder, ale tylko po to, żeby trzymać listę ścieżek do zdjęć
         self.metadata = metadata
         self.transform = transform
-        self.active_populations = list(active_populations)
-
-        #  FILTRUJ tylko populacje z configa
+        self.active_populations = set(active_populations)
         self.valid_indices = [
-            idx for idx, (path, label) in enumerate(self.image_folder.imgs)
+            idx for idx, (path, _) in enumerate(self.image_folder.imgs)
             if self._is_valid(path)
         ]
 
@@ -37,13 +33,13 @@ class HerringValDataset(Dataset):
 
     def __getitem__(self, idx):
         real_idx = self.valid_indices[idx]
-        path, label = self.image_folder.imgs[real_idx]
+        path, _ = self.image_folder.imgs[real_idx]  # **ignoruj label z ImageFolder**
         image = Image.open(path).convert("RGB")
         img_tensor = self.transform(image)
         filename = os.path.basename(path).strip().lower()
         pop, wiek = self.metadata.get(filename, (-9, -9))
         meta = {'populacja': pop, 'wiek': wiek}
-        return img_tensor, label, meta
+        return img_tensor, pop, meta  # <<<<<<<<<<<<<< UWAGA! label to pop z excela!
 
 class HerringDataset:
     def __init__(self, config: DictConfig):
@@ -57,30 +53,13 @@ class HerringDataset:
         self.max_count = max(self.class_counts.values())
         self.augment_applied = defaultdict(int)
         self.active_populations = list(self.cfg.data.active_populations)
-
-        print(f"\n📊 Największa liczność klas (populacja, wiek): {self.max_count}")
-        print(f"🟠 DEBUG: Aktywne populacje z configa: {self.active_populations}")
         self._validate_labels()
 
     def _load_metadata(self):
         excel_path = self.path_manager.metadata_file()
-        if not excel_path.exists():
-            raise FileNotFoundError(f"Nie znaleziono pliku Excel: {excel_path}")
-
         df = pd.read_excel(excel_path, engine="openpyxl")
-        if not all(col in df.columns for col in ["FileName", "Populacja", "Wiek"]):
-            raise ValueError("Plik Excel musi zawierać kolumny: 'FileName', 'Populacja', 'Wiek'.")
-
         df["Wiek"] = pd.to_numeric(df["Wiek"], errors="coerce").fillna(-9).astype(int)
         df["Populacja"] = pd.to_numeric(df["Populacja"], errors="coerce").fillna(-9).astype(int)
-
-        # 🟠 DEBUG: policz ile rekordów na populację (z excela)
-        pop_stats = dict(Counter(df["Populacja"]))
-        print(f"🟠 DEBUG: Liczność populacji w Excelu: {pop_stats}")
-
-        # 🟣 DEBUG MAPPING — WYDRUKUJ UNIKALNE POPULACJE Z EXCELA
-        print("🟣 DEBUG MAPPING: Unikalne populacje w Excelu:", sorted(df["Populacja"].unique()))
-
         return {
             str(row["FileName"]).strip().lower(): (int(row["Populacja"]), int(row["Wiek"]))
             for _, row in df.iterrows()
@@ -150,6 +129,7 @@ class HerringDataset:
         print(f"✔️ Etykiety klas poprawne {expected_labels}")
 
     def get_loaders(self):
+        from torchvision import datasets
         data_root = self.path_manager.data_root()
         train_dir = data_root / 'train'
         val_dir = data_root / 'val'
@@ -160,16 +140,7 @@ class HerringDataset:
         val_base = datasets.ImageFolder(str(val_dir))
         val_set = HerringValDataset(val_base, self.metadata, self.val_transform, self.active_populations)
 
-        train_set = AugmentWrapper(
-            base_dataset=train_base,
-            metadata=self.metadata,
-            class_counts=self.class_counts,
-            max_count=self.max_count,
-            transform_base=self.train_transform_base,
-            transform_strong=self.train_transform_strong,
-            augment_applied=self.augment_applied,
-            active_populations=self.active_populations,
-        )
+        train_set = HerringValDataset(train_base, self.metadata, self.train_transform_base, self.active_populations)  # <-- tu również
 
         train_loader = DataLoader(
             train_set,
@@ -187,29 +158,12 @@ class HerringDataset:
             pin_memory=torch.cuda.is_available()
         )
 
-        # 🟣 DEBUG MAPPING — WYDRUKUJ MAPPING IMAGEFOLDER
-        print("\n🟣 DEBUG MAPPING: MAPPING folderów do indeksów klas wg ImageFolder:")
-        for idx, class_name in enumerate(train_base.classes):
-            print(f"Label {idx} = Populacja (nazwa folderu): {class_name}")
-
-        # 🟣 DEBUG MAPPING — WYDRUKUJ PIERWSZY BATCH Z LABELS I META
-        print("\n🟣 DEBUG MAPPING: Przykładowy batch z train_loader (label vs meta['populacja']):")
+        # DEBUG: sprawdź czy batch daje populacje takie jak z excela
         for batch in train_loader:
             imgs, labels, metas = batch
-            print("labels (ImageFolder):", labels[:10])
-            print("type(metas):", type(metas))
-            print("Przykładowy meta:", metas)
-            if isinstance(metas, list) or isinstance(metas, tuple):
-                print("meta['populacja']:", [m['populacja'] for m in metas[:10]])
-            else:
-                print("meta['populacja'] (pojedynczy obiekt):", metas.get('populacja', 'brak'))
-            break  # tylko jeden batch!
+            print("DEBUG batch populacje (labels):", labels)
+            print("DEBUG batch populacje (meta):", [m['populacja'] for m in metas])
+            break
 
-        # 🟠 DEBUG: liczność etykiet w train_loader
-        debug_labels = []
-        for _, label, meta in train_loader.dataset:
-            debug_labels.append(meta['populacja'])
-        from collections import Counter as Cnt
-        print("🟠 DEBUG: Rozkład populacji w train_loader:", dict(Cnt(debug_labels)))
+        return train_loader, val_loader, self.active_populations  # <-- lista populacji, nie labeli z ImageFolder
 
-        return train_loader, val_loader, train_base.classes
