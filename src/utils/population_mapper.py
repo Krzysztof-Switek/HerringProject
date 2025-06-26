@@ -24,3 +24,7 @@ class PopulationMapper:
     def map_preds(self, preds):
         """Konwertuj listę indeksów na numery populacji."""
         return [self.to_pop(idx) for idx in preds]
+
+    def all_pops(self):
+        """Zwraca listę wszystkich aktywnych populacji (numery biologiczne z excela)"""
+        return list(self.active_populations)
