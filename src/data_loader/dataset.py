@@ -162,8 +162,14 @@ class HerringDataset:
         for batch in train_loader:
             imgs, labels, metas = batch
             print("DEBUG batch populacje (labels):", labels)
-            print("DEBUG batch populacje (meta):", [m['populacja'] for m in metas])
+            print("DEBUG batch populacje (meta):", metas)
+            print("type(metas):", type(metas))
+            if isinstance(metas, dict) and 'populacja' in metas:
+                print("Populacje tensor:", metas['populacja'])
+            elif isinstance(metas, list) and len(metas) > 0 and isinstance(metas[0], dict):
+                print("Populacje lista:", [m['populacja'] for m in metas])
+
             break
 
-        return train_loader, val_loader, self.active_populations  # <-- lista populacji, nie labeli z ImageFolder
+        return train_loader, val_loader, self.active_populations
 
