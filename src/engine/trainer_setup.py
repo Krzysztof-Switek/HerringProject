@@ -16,6 +16,7 @@ from .trainer_logger import (
 from engine.train_loop import train_epoch, validate
 from engine.predict_after_training import run_full_dataset_prediction
 
+
 def run_training_loop(trainer):
     train_loader, val_loader, class_names = trainer.data_loader.get_loaders()
     trainer.class_names = class_names
@@ -161,6 +162,20 @@ def run_training_loop(trainer):
                 log_dir=log_dir,
                 full_name=full_name
             )
+
+            try:
+                from utils.Training_Prediction_Report import TrainingPredictionReport
+                predictions_path = log_dir / f"{full_name}_predictions.xlsx"
+                print(f"📑 Generuję raport PDF podsumowujący cały trening oraz predykcję w: {log_dir}")
+                report = TrainingPredictionReport(
+                    log_dir=log_dir,
+                    config_path=trainer.path_manager.config_path(),
+                    predictions_path=predictions_path,
+                    metadata_path=trainer.path_manager.metadata_file()
+                )
+                report.run()
+            except Exception as e:
+                print(f"⚠️ Nie udało się wygenerować raportu PDF: {e}")
+
         else:
             print(f"⚠️ Brak zapisanego modelu dla {loss_name}, predykcja pominięta.")
-
