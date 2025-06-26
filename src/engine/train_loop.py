@@ -2,17 +2,18 @@ import numpy as np
 import torch
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
 
-
-def train_epoch(model, device, dataloader, loss_fn, optimizer,
-                population_mapper):  # ZMIENIONO: dodano population_mapper
+def train_epoch(model, device, dataloader, loss_fn, optimizer, population_mapper):
     model.train()
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
     all_targets, all_preds, all_probs = [], [], []
+    mapper = population_mapper
 
-    # *** MAPOWANIE: pobieramy idx->pop oraz pop->idx ***
-    mapper = population_mapper  # DODANO: jawny mapper
+    print(f"\n⏩ [train_epoch] Start trenowania. Liczba batchy: {len(dataloader)}")
 
-    for inputs, targets, meta in dataloader:
+    for batch_idx, (inputs, targets, meta) in enumerate(dataloader):
+        if batch_idx % 50 == 0 or batch_idx == len(dataloader) - 1:
+            print(f"    [train_epoch] Batch {batch_idx+1}/{len(dataloader)} ({round(100*(batch_idx+1)/len(dataloader))}%)")
+
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
         outputs = model(inputs)
@@ -32,21 +33,25 @@ def train_epoch(model, device, dataloader, loss_fn, optimizer,
         stats['correct'] += int(np.sum(preds_np == targets_np))
         stats['total'] += targets.size(0)
 
-        # *** ZAMIANA: zapamiętujemy indeksy, NIE numery populacji ***
         all_targets.extend(targets_np)
         all_preds.extend(preds_np)
-        all_probs.extend(probs_np[range(len(preds_np)), preds_np])  # prawdopodobieństwo trafionej klasy
+        all_probs.extend(probs_np[range(len(preds_np)), preds_np])
+
+    print(f"✅ [train_epoch] Epoka zakończona. Obliczam metryki...")
 
     loss = stats['loss'] / len(dataloader)
     acc = 100. * stats['correct'] / stats['total']
-    # *** MAPOWANIE: wyświetl metryki dla populacji (numery biologiczne) ***
-    all_targets_pop = [mapper.to_pop(idx) for idx in all_targets]  # DODANO
-    all_preds_pop = [mapper.to_pop(idx) for idx in all_preds]  # DODANO
+    all_targets_pop = [mapper.to_pop(idx) for idx in all_targets]
+    all_preds_pop = [mapper.to_pop(idx) for idx in all_preds]
 
-    precision = precision_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)  # ZMIENIONO
-    recall = recall_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)  # ZMIENIONO
-    f1 = f1_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)  # ZMIENIONO
-    auc = roc_auc_score(all_targets, all_probs, multi_class='ovr')  # ZMIENIONO (indexy klas)
+    print(f"    [train_epoch] Unikalne klasy w targetach: {set(all_targets_pop)} | w predykcjach: {set(all_preds_pop)}")
+
+    precision = precision_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)
+    recall = recall_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)
+    f1 = f1_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)
+    auc = roc_auc_score(all_targets, all_probs, multi_class='ovr')
+
+    print(f"    [train_epoch] Loss: {loss:.4f} | Acc: {acc:.2f}% | F1: {f1:.3f} | AUC: {auc:.3f}")
 
     return {
         "loss": loss,
@@ -55,19 +60,23 @@ def train_epoch(model, device, dataloader, loss_fn, optimizer,
         "recall": recall,
         "f1": f1,
         "auc": auc,
-        "targets": all_targets_pop  # ZAMIANA: zwracaj jako numery populacji
+        "targets": all_targets_pop
     }
 
 
-def validate(model, device, dataloader, loss_fn, population_mapper):  # ZMIENIONO: dodano population_mapper
+def validate(model, device, dataloader, loss_fn, population_mapper):
     model.eval()
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
     all_targets, all_preds, all_probs = [], [], []
+    mapper = population_mapper
 
-    mapper = population_mapper  # DODANO
+    print(f"\n⏩ [validate] Start walidacji. Liczba batchy: {len(dataloader)}")
 
     with torch.no_grad():
-        for batch in dataloader:
+        for batch_idx, batch in enumerate(dataloader):
+            if batch_idx % 50 == 0 or batch_idx == len(dataloader) - 1:
+                print(f"    [validate] Batch {batch_idx+1}/{len(dataloader)} ({round(100*(batch_idx+1)/len(dataloader))}%)")
+
             if len(batch) != 3:
                 raise ValueError(
                     f"Batch walidacyjny musi zawierać 3 elementy: (inputs, targets, meta). "
@@ -95,17 +104,22 @@ def validate(model, device, dataloader, loss_fn, population_mapper):  # ZMIENION
             all_preds.extend(preds_np)
             all_probs.extend(probs_np[range(len(preds_np)), preds_np])
 
+    print(f"✅ [validate] Walidacja zakończona. Obliczam metryki...")
+
     loss = stats['loss'] / len(dataloader)
     acc = 100. * stats['correct'] / stats['total']
-    # MAPUJEMY do numerów populacji:
-    all_targets_pop = [mapper.to_pop(idx) for idx in all_targets]  # DODANO
-    all_preds_pop = [mapper.to_pop(idx) for idx in all_preds]  # DODANO
+    all_targets_pop = [mapper.to_pop(idx) for idx in all_targets]
+    all_preds_pop = [mapper.to_pop(idx) for idx in all_preds]
 
-    precision = precision_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)  # ZMIENIONO
-    recall = recall_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)  # ZMIENIONO
-    f1 = f1_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)  # ZMIENIONO
-    auc = roc_auc_score(all_targets, all_probs, multi_class='ovr')  # ZMIENIONO
-    cm = confusion_matrix(all_targets_pop, all_preds_pop, labels=mapper.all_pops())  # ZMIENIONO
+    print(f"    [validate] Unikalne klasy w targetach: {set(all_targets_pop)} | w predykcjach: {set(all_preds_pop)}")
+
+    precision = precision_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)
+    recall = recall_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)
+    f1 = f1_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)
+    auc = roc_auc_score(all_targets, all_probs, multi_class='ovr')
+    cm = confusion_matrix(all_targets_pop, all_preds_pop, labels=mapper.all_pops())
+
+    print(f"    [validate] Loss: {loss:.4f} | Acc: {acc:.2f}% | F1: {f1:.3f} | AUC: {auc:.3f}")
 
     return {
         "loss": loss,
@@ -117,4 +131,3 @@ def validate(model, device, dataloader, loss_fn, population_mapper):  # ZMIENION
         "cm": cm,
         "targets": all_targets_pop
     }
-
