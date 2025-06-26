@@ -164,11 +164,15 @@ class HerringDataset:
             print("DEBUG batch populacje (labels):", labels)
             print("DEBUG batch populacje (meta):", metas)
             print("type(metas):", type(metas))
-            if isinstance(metas, dict) and 'populacja' in metas:
-                print("Populacje tensor:", metas['populacja'])
-            elif isinstance(metas, list) and len(metas) > 0 and isinstance(metas[0], dict):
-                print("Populacje lista:", [m['populacja'] for m in metas])
-
+            # Jeśli metas jest dict z tensorami (to domyślne zachowanie PyTorch)
+            if isinstance(metas, dict):
+                for key, val in metas.items():
+                    print(f"meta[{key}]:", val)
+                # Najważniejsze: wypisz populacje
+                if 'populacja' in metas:
+                    print("Populacje tensor:", metas['populacja'])
+            else:
+                print("UWAGA: Nieoczekiwany typ metas:", type(metas))
             break
 
         return train_loader, val_loader, self.active_populations
