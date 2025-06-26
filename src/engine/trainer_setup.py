@@ -99,14 +99,16 @@ def run_training_loop(trainer):
                 device=trainer.device,
                 dataloader=train_loader,
                 loss_fn=loss_fn,
-                optimizer=optimizer
+                optimizer=optimizer,
+                population_mapper=trainer.population_mapper
             )
 
             val_metrics = validate(
                 model=trainer.model,
                 device=trainer.device,
                 dataloader=val_loader,
-                loss_fn=loss_fn
+                loss_fn=loss_fn,
+                population_mapper=trainer.population_mapper
             )
 
             epoch_time = time.time() - start_time

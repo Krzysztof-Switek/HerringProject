@@ -7,9 +7,12 @@ def init_metrics_logger(trainer, log_dir, full_name):
     metrics_file_path = log_dir / f"{full_name}_training_metrics.csv"
     trainer.metrics_file = open(metrics_file_path, mode="w", newline="")
     trainer.metrics_writer = csv.writer(trainer.metrics_file)
-    # dynamicznie nagłówki dla każdej populacji
-    class_labels = list(trainer.cfg.data.active_populations)
-    class_headers = [f"Train Class {pop}" for pop in class_labels]
+
+    # 🟢 ZMIANA: Użyj population_mapper do opisania klas biologicznych
+    class_labels = list(range(len(trainer.population_mapper.active_populations)))   # 🟢 ZMIANA
+    biologic_labels = [trainer.population_mapper.to_pop(idx) for idx in class_labels]  # 🟢 ZMIANA
+    class_headers = [f"Train Class {bio} (idx {idx})" for bio, idx in zip(biologic_labels, class_labels)]  # 🟢 ZMIANA
+
     trainer.metrics_writer.writerow([
         'Epoch', 'Train Samples', 'Val Samples', *class_headers,
         'Train Loss', 'Train Accuracy', 'Train Precision', 'Train Recall', 'Train F1', 'Train AUC',
@@ -18,15 +21,17 @@ def init_metrics_logger(trainer, log_dir, full_name):
     ])
 
 def log_epoch_metrics(trainer, epoch, loss_name, train_metrics, val_metrics, epoch_time):
-    #  dynamicznie pobierane klasy
-    class_labels = list(trainer.cfg.data.active_populations)
+    # 🟢 ZMIANA: indeksy klas zamiast numerów populacji
+    class_labels = list(range(len(trainer.population_mapper.active_populations)))   # 🟢 ZMIANA
+    biologic_labels = [trainer.population_mapper.to_pop(idx) for idx in class_labels]  # 🟢 ZMIANA
+
     train_class_counts = get_class_distribution(train_metrics["targets"], class_labels)
     val_class_counts = get_class_distribution(val_metrics["targets"], class_labels)
     val_samples = len(val_metrics["targets"])
     train_samples = len(train_metrics["targets"])
 
-    #  dynamiczny print klas
-    class_dist_str = ", ".join([f"{lbl}: {cnt}" for lbl, cnt in zip(class_labels, train_class_counts)])
+    # 🟢 ZMIANA: Dodano print indeksy → biologiczne
+    class_dist_str = ", ".join([f"{lbl}({bio}): {cnt}" for lbl, bio, cnt in zip(class_labels, biologic_labels, train_class_counts)])  # 🟢 ZMIANA
     print(f"\nEpoch {epoch + 1}/{trainer.cfg.training.epochs} ({loss_name}):")
     print(f"Train - Loss: {train_metrics['loss']:.4f}, Acc: {train_metrics['acc']:.2f}%, "
           f"Precision: {train_metrics['precision']:.2f}, Recall: {train_metrics['recall']:.2f}, "
@@ -34,7 +39,7 @@ def log_epoch_metrics(trainer, epoch, loss_name, train_metrics, val_metrics, epo
     print(f"Val   - Loss: {val_metrics['loss']:.4f}, Acc: {val_metrics['acc']:.2f}%, "
           f"Precision: {val_metrics['precision']:.2f}, Recall: {val_metrics['recall']:.2f}, "
           f"F1: {val_metrics['f1']:.2f}, AUC: {val_metrics['auc']:.2f}")
-    print(f"Train class dist: {class_dist_str}, Time: {epoch_time:.1f}s")
+    print(f"Train class dist: {class_dist_str}, Time: {epoch_time:.1f}s")  # 🟢 ZMIANA
 
     trainer.metrics_writer.writerow([
         f"{loss_name}-e{epoch + 1}", train_samples, val_samples, *train_class_counts,
@@ -65,9 +70,8 @@ def get_class_distribution(targets, class_labels):
     targets = [int(t.item()) if hasattr(t, 'item') else int(t) for t in targets]
     values, counts = np.unique(targets, return_counts=True)
     class_dist = {int(v): int(c) for v, c in zip(values, counts)}
-    # 🟢 Gwarantowana kolejność zgodna z class_labels
+    # 🟢 Gwarantowana kolejność zgodna z class_labels (czyli z population_mapper)
     return tuple(class_dist.get(int(lbl), 0) for lbl in class_labels)
-
 
 def log_augmentation_summary(augment_applied_dict, full_name, log_dir: Path = None):
     if log_dir is None:

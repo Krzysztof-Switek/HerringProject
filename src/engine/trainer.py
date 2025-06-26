@@ -4,18 +4,20 @@ from omegaconf import OmegaConf
 from data_loader.dataset import HerringDataset
 from utils.path_manager import PathManager
 from engine.trainer_setup import run_training_loop
+from utils.population_mapper import PopulationMapper
 
 class Trainer:
     def __init__(self, config_path: str = None, project_root: Path = None):
         self.project_root = project_root or Path(__file__).parent.parent
         print(f"\nProject root: {self.project_root}")
         self.cfg = self._load_config(config_path)
+        self.population_mapper = PopulationMapper(self.cfg.data.active_populations)
         self.path_manager = PathManager(self.project_root, self.cfg)
         self.device = self._init_device()
         print(f"Using device: {self.device}")
         self._validate_data_structure()
         self.model = None
-        self.data_loader = HerringDataset(self.cfg)
+        self.data_loader = HerringDataset(self.cfg, population_mapper=self.population_mapper)
         self.last_model_path = None
 
     def _load_config(self, config_path: str = None):

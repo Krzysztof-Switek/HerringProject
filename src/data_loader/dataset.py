@@ -1,5 +1,3 @@
-# data_loader/dataset.py
-
 import os
 import torch
 import pandas as pd
@@ -9,14 +7,15 @@ from collections import Counter, defaultdict
 from omegaconf import DictConfig
 from pathlib import Path
 from utils.path_manager import PathManager
+from utils.population_mapper import PopulationMapper    # DODANO
 from PIL import Image
 
 class HerringValDataset(Dataset):
-    def __init__(self, image_folder, metadata, transform, active_populations):
-        self.image_folder = image_folder  # ImageFolder, ale tylko po to, żeby trzymać listę ścieżek do zdjęć
+    def __init__(self, image_folder, metadata, transform, population_mapper):
+        self.image_folder = image_folder
         self.metadata = metadata
         self.transform = transform
-        self.active_populations = set(active_populations)
+        self.population_mapper = population_mapper
         self.valid_indices = [
             idx for idx, (path, _) in enumerate(self.image_folder.imgs)
             if self._is_valid(path)
@@ -26,23 +25,24 @@ class HerringValDataset(Dataset):
         fname = os.path.basename(path).strip().lower()
         meta = self.metadata.get(fname, (-9, -9))
         pop = meta[0]
-        return pop in self.active_populations
+        return pop in self.population_mapper.active_populations
 
     def __len__(self):
         return len(self.valid_indices)
 
     def __getitem__(self, idx):
         real_idx = self.valid_indices[idx]
-        path, _ = self.image_folder.imgs[real_idx]  # **ignoruj label z ImageFolder**
+        path, _ = self.image_folder.imgs[real_idx]
         image = Image.open(path).convert("RGB")
         img_tensor = self.transform(image)
         filename = os.path.basename(path).strip().lower()
         pop, wiek = self.metadata.get(filename, (-9, -9))
+        label = self.population_mapper.to_idx(pop)
         meta = {'populacja': pop, 'wiek': wiek}
-        return img_tensor, pop, meta  # <<<<<<<<<<<<<< UWAGA! label to pop z excela!
+        return img_tensor, label, meta
 
 class HerringDataset:
-    def __init__(self, config: DictConfig):
+    def __init__(self, config: DictConfig, population_mapper=None):
         self.cfg = config
         self.path_manager = PathManager(Path(__file__).parent.parent.parent, config)
         self.train_transform_base = self._get_base_transforms()
@@ -53,6 +53,7 @@ class HerringDataset:
         self.max_count = max(self.class_counts.values())
         self.augment_applied = defaultdict(int)
         self.active_populations = list(self.cfg.data.active_populations)
+        self.population_mapper = population_mapper or PopulationMapper(self.active_populations)
         self._validate_labels()
 
     def _load_metadata(self):
@@ -136,11 +137,10 @@ class HerringDataset:
 
         train_base = datasets.ImageFolder(str(train_dir))
         train_base.transform = self.train_transform_base
-
         val_base = datasets.ImageFolder(str(val_dir))
-        val_set = HerringValDataset(val_base, self.metadata, self.val_transform, self.active_populations)
 
-        train_set = HerringValDataset(train_base, self.metadata, self.train_transform_base, self.active_populations)  # <-- tu również
+        val_set = HerringValDataset(val_base, self.metadata, self.val_transform, self.population_mapper)
+        train_set = HerringValDataset(train_base, self.metadata, self.train_transform_base, self.population_mapper)
 
         train_loader = DataLoader(
             train_set,
@@ -161,18 +161,10 @@ class HerringDataset:
         # DEBUG: sprawdź czy batch daje populacje takie jak z excela
         for batch in train_loader:
             imgs, labels, metas = batch
-            print("DEBUG batch populacje (labels):", labels)
-            print("DEBUG batch populacje (meta):", metas)
-            print("type(metas):", type(metas))
-            # Jeśli metas jest dict z tensorami (to domyślne zachowanie PyTorch)
-            if isinstance(metas, dict):
-                for key, val in metas.items():
-                    print(f"meta[{key}]:", val)
-                # Najważniejsze: wypisz populacje
-                if 'populacja' in metas:
-                    print("Populacje tensor:", metas['populacja'])
-            else:
-                print("UWAGA: Nieoczekiwany typ metas:", type(metas))
+            print("DEBUG batch klasy indeksy (labels):", labels)
+            print("DEBUG batch meta populacje (z excela):", [m['populacja'] for m in metas])
+            print("DEBUG batch meta wiek:", [m['wiek'] for m in metas])
+            print("DEBUG batch klasy biologiczne:", [self.population_mapper.to_pop(idx) for idx in labels])
             break
 
         return train_loader, val_loader, self.active_populations

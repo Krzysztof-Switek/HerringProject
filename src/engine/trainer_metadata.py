@@ -19,4 +19,3 @@ def get_class_metadata(trainer):
         "class_counts": class_counts,
         "class_freq": class_freq
     }
-

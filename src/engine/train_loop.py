@@ -2,17 +2,15 @@ import numpy as np
 import torch
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
 
-def train_epoch(model, device, dataloader, loss_fn, optimizer):
+
+def train_epoch(model, device, dataloader, loss_fn, optimizer,
+                population_mapper):  # ZMIENIONO: dodano population_mapper
     model.train()
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
     all_targets, all_preds, all_probs = [], [], []
 
-    # pobierz klasy z dataloadera, najlepiej z configu
-    class_labels = None
-    if hasattr(dataloader.dataset, 'base_dataset') and hasattr(dataloader.dataset.base_dataset, 'classes'):
-        class_labels = [int(x) for x in dataloader.dataset.base_dataset.classes]
-    elif hasattr(dataloader.dataset, 'classes'):
-        class_labels = [int(x) for x in dataloader.dataset.classes]
+    # *** MAPOWANIE: pobieramy idx->pop oraz pop->idx ***
+    mapper = population_mapper  # DODANO: jawny mapper
 
     for inputs, targets, meta in dataloader:
         inputs, targets = inputs.to(device), targets.to(device)
@@ -24,31 +22,31 @@ def train_epoch(model, device, dataloader, loss_fn, optimizer):
         optimizer.step()
 
         logits = outputs[0] if isinstance(outputs, tuple) else outputs
-        probs = torch.softmax(logits, dim=1)[:, 1].detach().cpu().numpy()
-        preds = logits.argmax(dim=1).detach().cpu().numpy()
+        probs = torch.softmax(logits, dim=1)  # [batch, num_classes]
+        preds = logits.argmax(dim=1)
         targets_np = targets.cpu().numpy()
+        preds_np = preds.detach().cpu().numpy()
+        probs_np = probs.detach().cpu().numpy()
 
         stats['loss'] += loss.item()
-        stats['correct'] += int(np.sum(preds == targets_np))
+        stats['correct'] += int(np.sum(preds_np == targets_np))
         stats['total'] += targets.size(0)
-        # 🟢 ZMIANA: filtruj tylko dozwolone klasy
-        if class_labels is not None:
-            for target, pred, prob in zip(targets_np, preds, probs):
-                if int(target) in class_labels:
-                    all_targets.append(int(target))
-                    all_preds.append(int(pred))
-                    all_probs.append(float(prob))
-        else:
-            all_targets.extend(targets_np)
-            all_preds.extend(preds)
-            all_probs.extend(probs)
+
+        # *** ZAMIANA: zapamiętujemy indeksy, NIE numery populacji ***
+        all_targets.extend(targets_np)
+        all_preds.extend(preds_np)
+        all_probs.extend(probs_np[range(len(preds_np)), preds_np])  # prawdopodobieństwo trafionej klasy
 
     loss = stats['loss'] / len(dataloader)
     acc = 100. * stats['correct'] / stats['total']
-    precision = precision_score(all_targets, all_preds, zero_division=0)
-    recall = recall_score(all_targets, all_preds, zero_division=0)
-    f1 = f1_score(all_targets, all_preds, zero_division=0)
-    auc = roc_auc_score(all_targets, all_probs)
+    # *** MAPOWANIE: wyświetl metryki dla populacji (numery biologiczne) ***
+    all_targets_pop = [mapper.to_pop(idx) for idx in all_targets]  # DODANO
+    all_preds_pop = [mapper.to_pop(idx) for idx in all_preds]  # DODANO
+
+    precision = precision_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)  # ZMIENIONO
+    recall = recall_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)  # ZMIENIONO
+    f1 = f1_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)  # ZMIENIONO
+    auc = roc_auc_score(all_targets, all_probs, multi_class='ovr')  # ZMIENIONO (indexy klas)
 
     return {
         "loss": loss,
@@ -57,20 +55,16 @@ def train_epoch(model, device, dataloader, loss_fn, optimizer):
         "recall": recall,
         "f1": f1,
         "auc": auc,
-        "targets": all_targets
+        "targets": all_targets_pop  # ZAMIANA: zwracaj jako numery populacji
     }
 
-def validate(model, device, dataloader, loss_fn):
+
+def validate(model, device, dataloader, loss_fn, population_mapper):  # ZMIENIONO: dodano population_mapper
     model.eval()
     stats = {'loss': 0.0, 'correct': 0, 'total': 0}
     all_targets, all_preds, all_probs = [], [], []
 
-    # pobierz klasy z dataloadera, najlepiej z configu
-    class_labels = None
-    if hasattr(dataloader.dataset, 'base_dataset') and hasattr(dataloader.dataset.base_dataset, 'classes'):
-        class_labels = [int(x) for x in dataloader.dataset.base_dataset.classes]
-    elif hasattr(dataloader.dataset, 'classes'):
-        class_labels = [int(x) for x in dataloader.dataset.classes]
+    mapper = population_mapper  # DODANO
 
     with torch.no_grad():
         for batch in dataloader:
@@ -88,31 +82,30 @@ def validate(model, device, dataloader, loss_fn):
             stats['loss'] += loss.item()
 
             logits = outputs[0] if isinstance(outputs, tuple) else outputs
-            probs = torch.softmax(logits, dim=1)[:, 1].cpu().numpy()
-            preds = logits.argmax(dim=1).cpu().numpy()
+            probs = torch.softmax(logits, dim=1)
+            preds = logits.argmax(dim=1)
             targets_np = targets.cpu().numpy()
+            preds_np = preds.cpu().numpy()
+            probs_np = probs.cpu().numpy()
 
-            stats['correct'] += int(np.sum(preds == targets_np))
+            stats['correct'] += int(np.sum(preds_np == targets_np))
             stats['total'] += targets.size(0)
-            # 🟢 ZMIANA: filtruj tylko dozwolone klasy
-            if class_labels is not None:
-                for target, pred, prob in zip(targets_np, preds, probs):
-                    if int(target) in class_labels:
-                        all_targets.append(int(target))
-                        all_preds.append(int(pred))
-                        all_probs.append(float(prob))
-            else:
-                all_targets.extend(targets_np)
-                all_preds.extend(preds)
-                all_probs.extend(probs)
+
+            all_targets.extend(targets_np)
+            all_preds.extend(preds_np)
+            all_probs.extend(probs_np[range(len(preds_np)), preds_np])
 
     loss = stats['loss'] / len(dataloader)
     acc = 100. * stats['correct'] / stats['total']
-    precision = precision_score(all_targets, all_preds, zero_division=0)
-    recall = recall_score(all_targets, all_preds, zero_division=0)
-    f1 = f1_score(all_targets, all_preds, zero_division=0)
-    auc = roc_auc_score(all_targets, all_probs)
-    cm = confusion_matrix(all_targets, all_preds)
+    # MAPUJEMY do numerów populacji:
+    all_targets_pop = [mapper.to_pop(idx) for idx in all_targets]  # DODANO
+    all_preds_pop = [mapper.to_pop(idx) for idx in all_preds]  # DODANO
+
+    precision = precision_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)  # ZMIENIONO
+    recall = recall_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)  # ZMIENIONO
+    f1 = f1_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)  # ZMIENIONO
+    auc = roc_auc_score(all_targets, all_probs, multi_class='ovr')  # ZMIENIONO
+    cm = confusion_matrix(all_targets_pop, all_preds_pop, labels=mapper.all_pops())  # ZMIENIONO
 
     return {
         "loss": loss,
@@ -122,5 +115,6 @@ def validate(model, device, dataloader, loss_fn):
         "f1": f1,
         "auc": auc,
         "cm": cm,
-        "targets": all_targets
+        "targets": all_targets_pop
     }
+

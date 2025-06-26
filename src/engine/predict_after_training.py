@@ -5,10 +5,14 @@ import torch.nn.functional as F
 from torchvision import transforms
 from models.model import HerringModel
 from models.multitask_model import MultiTaskHerringModel
+from utils.population_mapper import PopulationMapper  # 🟢 DODANO
 
 def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, log_dir, full_name):
     cfg = path_manager.cfg
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # 🟢 PopulationMapper zgodnie z configiem
+    population_mapper = PopulationMapper(cfg.data.active_populations)  # 🟢 DODANO
 
     # Wybór odpowiedniego modelu
     if getattr(cfg, "multitask_model", {}).get("use", False):
@@ -39,7 +43,9 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, l
         raise ValueError("Brakuje kolumny 'FilePath' zawierającej ścieżki do obrazów")
 
     data_root = path_manager.data_root()
-    folders = ["train/1", "train/2", "val/1", "val/2", "test/1", "test/2"]
+    folders = [f"train/{pop}" for pop in population_mapper.active_populations] + \
+              [f"val/{pop}" for pop in population_mapper.active_populations] + \
+              [f"test/{pop}" for pop in population_mapper.active_populations]   # 🟢 UOGÓLNIENIE folderów
     all_image_paths = []
     for folder in folders:
         folder_path = data_root / folder
@@ -61,8 +67,9 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, l
                 if is_multitask:
                     output = output[0]  # klasyfikacja (pomijamy predykcję wieku)
                 probs = F.softmax(output, dim=1)[0]
-                pred_class = output.argmax().item() + 1
-                confidence = float(probs[pred_class - 1]) * 100
+                pred_idx = output.argmax().item()  # 🟢 INDEKS modelu (np. 0, 1)
+                pred_class = population_mapper.to_pop(pred_idx)  # 🟢 NUMER populacji z Excela!
+                confidence = float(probs[pred_idx]) * 100
             key = image_path.name.lower()
             predictions[key] = (pred_class, round(confidence, 2))
         except Exception as e:

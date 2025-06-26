@@ -96,4 +96,5 @@ class MultiTaskHerringModel(nn.Module):
         print(f"Trainable parameters: {trainable_params:,}")
         print(f"Pretrained weights: {self.cfg.pretrained}")
         print(f"Frozen encoder: {self.cfg.freeze_encoder}")
+        print(f"Liczba klas populacji (output): {len(self.full_cfg.data.active_populations)}")
         print("=" * 50 + "\n")
