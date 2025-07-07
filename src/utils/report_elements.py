@@ -115,6 +115,49 @@ class ReportImage(ReportElement):
         flows.append(Spacer(1, 8))
         return flows
 
+# --- DODAJ PONIŻEJ ReportImage ---
+class ReportImageRow(ReportElement):  # <<< DODANE
+    """Umieszcza dwa obrazy w jednym wierszu, szerokość dzielona proporcjonalnie."""
+    def __init__(self, paths, width=USABLE_WIDTH, height=None, captions=None):
+        assert 1 <= len(paths) <= 2, "Możesz podać 1 lub 2 obrazy!"
+        self.paths = [str(p) for p in paths]
+        self.width = width
+        self.height = height
+        self.captions = captions or [""] * len(paths)
+
+    def get_flowables(self):
+        from reportlab.platypus import Table, TableStyle
+        flowables = []
+        n = len(self.paths)
+        cell_width = self.width / n
+        cells = []
+        caption_cells = []
+        for i, path in enumerate(self.paths):
+            p = Path(path)
+            if not p.exists():
+                img_flow = Paragraph(f"<font color='red'><b>Brak pliku wykresu: {p.name}</b></font>", getSampleStyleSheet()['Normal'])
+            else:
+                h = self.height
+                if h is None:
+                    with PILImage.open(path) as img:
+                        w, h_img = img.size
+                        h = cell_width * h_img / w
+                img_flow = Image(path, width=cell_width, height=h)
+            cells.append(img_flow)
+            caption = self.captions[i] if self.captions else ""
+            caption_cells.append(Paragraph(caption, getSampleStyleSheet()['Italic']) if caption else Spacer(1, 2))
+        # Obrazki w wierszu
+        tbl = Table([cells], colWidths=[cell_width]*n)
+        tbl.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER'), ('VALIGN', (0, 0), (-1, -1), 'MIDDLE')]))
+        flowables.append(tbl)
+        # Opisy pod spodem
+        tbl2 = Table([caption_cells], colWidths=[cell_width]*n)
+        tbl2.setStyle(TableStyle([('ALIGN', (0, 0), (-1, -1), 'CENTER')]))
+        flowables.append(tbl2)
+        flowables.append(Spacer(1, 8))
+        return flowables
+
+
 class ReportPageBreak(ReportElement):
     def get_flowables(self):
         return [PageBreak()]

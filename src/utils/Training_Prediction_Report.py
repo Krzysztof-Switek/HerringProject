@@ -1,11 +1,16 @@
+import matplotlib.pyplot as plt
+from .report_constants import MATPLOTLIB_DEFAULTS
+import matplotlib
 import pandas as pd
 from pathlib import Path
-import matplotlib.pyplot as plt
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate
 from reportlab.lib.styles import getSampleStyleSheet
-from .report_elements import ReportText, ReportTable, ReportImage
-from .report_constants import MARGIN, USABLE_WIDTH
+from .report_elements import ReportText, ReportTable, ReportImageRow
+from .report_constants import MARGIN, USABLE_WIDTH, REPORT_IMAGE_HEIGHT
+from .plots import generate_report_plots
+matplotlib.rcParams.update(MATPLOTLIB_DEFAULTS)
+
 
 class TrainingPredictionReport:
     def __init__(self, log_dir, config_path, predictions_path, metadata_path,
@@ -77,7 +82,6 @@ class TrainingPredictionReport:
         training_cfg = cfg.get("training", {})
         setup["batch_size"] = cfg.get("data", {}).get("batch_size", "nieznany")
 
-        # --- ZMIANA: learning_rate jako notacja dziesiętna, przecinek jako separator dziesiętny ---
         lr = training_cfg.get("learning_rate", "nieznany")
         if isinstance(lr, float):
             setup["learning_rate"] = f"{lr:.6f}".replace('.', ',')
@@ -136,39 +140,6 @@ class TrainingPredictionReport:
         plt.savefig(save_path)
         plt.close()
 
-    def _plot_metrics(self, save_path_acc, save_path_loss):
-        Path(save_path_acc).parent.mkdir(parents=True, exist_ok=True)
-        Path(save_path_loss).parent.mkdir(parents=True, exist_ok=True)
-        fig_width_inch = USABLE_WIDTH / 25.4
-        fig_height_inch = 3
-        if self.metrics is not None and not self.metrics.empty:
-            epochs = list(range(1, len(self.metrics) + 1))
-            plt.figure(figsize=(fig_width_inch, fig_height_inch))
-            plt.plot(epochs, self.metrics["Train Accuracy"], label="Train Acc", marker='o')
-            plt.plot(epochs, self.metrics["Val Accuracy"], label="Val Acc", marker='o')
-            plt.ylabel("Accuracy (%)")
-            plt.xlabel("Epoka")
-            plt.title("Accuracy (trening/validacja)")
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-            plt.savefig(save_path_acc)
-            plt.close()
-            plt.figure(figsize=(fig_width_inch, fig_height_inch))
-            plt.plot(epochs, self.metrics["Train Loss"], label="Train Loss", marker='o')
-            plt.plot(epochs, self.metrics["Val Loss"], label="Val Loss", marker='o')
-            plt.ylabel("Loss")
-            plt.xlabel("Epoka")
-            plt.title("Loss (trening/validacja)")
-            plt.legend()
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-            plt.savefig(save_path_loss)
-            plt.close()
-        else:
-            self._plot_placeholder(save_path_acc, "Brak danych metryk!", width_inch=fig_width_inch, height_inch=fig_height_inch)
-            self._plot_placeholder(save_path_loss, "Brak danych metryk!", width_inch=fig_width_inch, height_inch=fig_height_inch)
-
     def generate_pdf(self):
         print("[REPORT] Generowanie PDF z podsumowaniem...")
         pdf_filename = f"Raport dla - {self.log_dir.name}.pdf"
@@ -192,12 +163,10 @@ class TrainingPredictionReport:
         if self.metrics is not None and self.best_metrics:
             idx_best = self.metrics["Val Accuracy"].idxmax()
             best_row = self.metrics.loc[idx_best]
-            # Przygotuj train columns i values
             train_columns = [
                 "Train Loss", "Train Accuracy", "Train Precision", "Train Recall", "Train F1", "Train AUC"
             ]
             train_values = [
-
                 f"{best_row['Train Loss']:.2f}" if 'Train Loss' in best_row else "-",
                 f"{best_row['Train Accuracy']:.2f}" if 'Train Accuracy' in best_row else "-",
                 f"{best_row['Train Precision']:.2f}" if 'Train Precision' in best_row else "-",
@@ -208,7 +177,6 @@ class TrainingPredictionReport:
             elements.append(ReportText("<b>Tabela metryk treningowych (najlepsza epoka)</b>", getSampleStyleSheet()['Title']))
             elements.append(ReportTable([train_columns, train_values]))
 
-            # --- Tabela metryk walidacyjnych ---
             val_columns = [
                 "Val Loss", "Val Accuracy", "Val Precision", "Val Recall", "Val F1", "Val AUC"
             ]
@@ -223,16 +191,15 @@ class TrainingPredictionReport:
             elements.append(ReportText("<b>Tabela metryk walidacyjnych (najlepsza epoka)</b>", getSampleStyleSheet()['Title']))
             elements.append(ReportTable([val_columns, val_values]))
 
-        # --- dalej wykresy i augmentacja (jeśli jest) ---
+        # --- wykresy --- (AUTOMATYZACJA)
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        tmp_acc = self.log_dir / "__temp_acc.png"
-        tmp_loss = self.log_dir / "__temp_loss.png"
-        self._plot_metrics(tmp_acc, tmp_loss)
+        plot_files = generate_report_plots(self.metrics, self.log_dir)
         elements.append(ReportText("<b>Wykresy metryk po epokach</b>", getSampleStyleSheet()['Title']))
-        elements.append(ReportText("Accuracy (trening/validacja):"))
-        elements.append(ReportImage(tmp_acc))
-        elements.append(ReportText("Loss (trening/validacja):"))
-        elements.append(ReportImage(tmp_loss))
+
+        # Dodajemy wykresy parami w wierszu (np. dwa na wiersz)
+        for i in range(0, len(plot_files), 2):
+            pair = plot_files[i:i+2]
+            elements.append(ReportImageRow(pair, height=REPORT_IMAGE_HEIGHT))
 
         if "Augmentacja" in self.experiment_setup and self.experiment_setup["Augmentacja"].strip() != "Brak/nie ustawiono":
             elements.append(ReportText("<b>Parametry augmentacji</b>", getSampleStyleSheet()['Title']))
@@ -253,9 +220,9 @@ class TrainingPredictionReport:
         doc.build(story)
 
         # Usuwanie plików tymczasowych po wygenerowaniu PDF
-        for tmpfile in [tmp_acc, tmp_loss]:
+        for plot_file in plot_files:
             try:
-                tmpfile.unlink()
+                Path(plot_file).unlink()
             except Exception:
                 pass
 
