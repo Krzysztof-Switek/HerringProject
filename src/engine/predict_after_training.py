@@ -8,21 +8,27 @@ from models.multitask_model import MultiTaskHerringModel
 from utils.population_mapper import PopulationMapper  # 🟢 DODANO
 
 def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, log_dir, full_name):
+    import pandas as pd
+    from PIL import Image
+    import torch
+    import torch.nn.functional as F
+    from torchvision import transforms
+    from models.model import HerringModel
+    from models.multitask_model import MultiTaskHerringModel
+    from utils.population_mapper import PopulationMapper
+
     cfg = path_manager.cfg
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # 🟢 PopulationMapper zgodnie z configiem
-    population_mapper = PopulationMapper(cfg.data.active_populations)  # 🟢 DODANO
+    population_mapper = PopulationMapper(cfg.data.active_populations)
 
-    # Wybór odpowiedniego modelu
-    if getattr(cfg, "multitask_model", {}).get("use", False):
+    # Ustal typ modelu
+    is_multitask = getattr(cfg, "multitask_model", {}).get("use", False)
+    if is_multitask:
         model = MultiTaskHerringModel(cfg).to(device)
-        is_multitask = True
     else:
         model = HerringModel(cfg).to(device)
-        is_multitask = False
 
-    # Wczytanie wag
     checkpoint = torch.load(model_path, map_location=device)
     if 'model_state_dict' in checkpoint:
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -30,7 +36,6 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, l
         model.load_state_dict(checkpoint)
     model.eval()
 
-    # Transformacja
     transform = transforms.Compose([
         transforms.Resize(cfg.base_model.image_size),
         transforms.ToTensor(),
@@ -45,7 +50,7 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, l
     data_root = path_manager.data_root()
     folders = [f"train/{pop}" for pop in population_mapper.active_populations] + \
               [f"val/{pop}" for pop in population_mapper.active_populations] + \
-              [f"test/{pop}" for pop in population_mapper.active_populations]   # 🟢 UOGÓLNIENIE folderów
+              [f"test/{pop}" for pop in population_mapper.active_populations]
     all_image_paths = []
     for folder in folders:
         folder_path = data_root / folder
@@ -63,41 +68,58 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, l
             image = Image.open(image_path).convert("RGB")
             input_tensor = transform(image).unsqueeze(0).to(device)
             with torch.no_grad():
-                output = model(input_tensor)
                 if is_multitask:
-                    output = output[0]  # klasyfikacja (pomijamy predykcję wieku)
-                probs = F.softmax(output, dim=1)[0]
-                pred_idx = output.argmax().item()  # 🟢 INDEKS modelu (np. 0, 1)
-                pred_class = population_mapper.to_pop(pred_idx)  # 🟢 NUMER populacji z Excela!
-                confidence = float(probs[pred_idx]) * 100
+                    pop_logits, age_pred = model(input_tensor)
+                    probs = F.softmax(pop_logits, dim=1)[0]
+                    pred_idx = pop_logits.argmax().item()
+                    pred_class = population_mapper.to_pop(pred_idx)
+                    confidence = float(probs[pred_idx]) * 100
+                    predicted_age = float(age_pred[0].item())  # <-- WIEK jako liczba zmiennoprzecinkowa
+                else:
+                    pop_logits = model(input_tensor)
+                    probs = F.softmax(pop_logits, dim=1)[0]
+                    pred_idx = pop_logits.argmax().item()
+                    pred_class = population_mapper.to_pop(pred_idx)
+                    confidence = float(probs[pred_idx]) * 100
+                    predicted_age = None  # brak predykcji wieku
             key = image_path.name.lower()
-            predictions[key] = (pred_class, round(confidence, 2))
+            predictions[key] = (pred_class, round(confidence, 2), predicted_age)
         except Exception as e:
             print(f"Błąd przetwarzania obrazu {image_path}: {e}")
 
-    # Zapis predykcji
     pred_column = f"{loss_name}_pred"
     prob_column = f"{loss_name}_prob"
-    pred_classes, pred_probs, not_found = [], [], []
+    age_column = f"{loss_name}_age_pred"
+    pred_classes, pred_probs, pred_ages, not_found = [], [], [], []
 
     for file_name in df["FileName"]:
         key = str(file_name).lower()
-        pred = predictions.get(key, (None, None))
+        pred = predictions.get(key, (None, None, None))
         if pred[0] is None:
             not_found.append(key)
         pred_classes.append(pred[0])
         pred_probs.append(pred[1])
+        pred_ages.append(pred[2])
 
     df[pred_column] = pred_classes
     df[prob_column] = pred_probs
+    if is_multitask:
+        df[age_column] = pred_ages
 
     output_path = log_dir / f"{full_name}_predictions.xlsx"
     if output_path.exists():
         existing_df = pd.read_excel(output_path)
-        existing_df = existing_df.drop(columns=[pred_column, prob_column], errors='ignore')
-        df = pd.concat([existing_df, df[[pred_column, prob_column]]], axis=1)
+        for col in [pred_column, prob_column, age_column]:
+            if col in existing_df.columns:
+                existing_df = existing_df.drop(columns=[col], errors='ignore')
+        # Dodajemy tylko nowe kolumny
+        if is_multitask:
+            df = pd.concat([existing_df, df[[pred_column, prob_column, age_column]]], axis=1)
+        else:
+            df = pd.concat([existing_df, df[[pred_column, prob_column]]], axis=1)
 
     df.to_excel(output_path, index=False)
     print(f"\n📊 Liczba przetworzonych obrazów: {len(predictions)}")
     print(f"✅ Zapisano predykcje ({loss_name}) do: {output_path}")
     print("⏭️ Przechodzę do kolejnej funkcji straty...\n")
+
