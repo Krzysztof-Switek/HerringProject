@@ -8,7 +8,7 @@ from reportlab.platypus import SimpleDocTemplate
 from reportlab.lib.styles import getSampleStyleSheet
 from .report_elements import ReportText, ReportTable, ReportImageRow
 from .report_constants import MARGIN, USABLE_WIDTH, REPORT_IMAGE_HEIGHT
-from .plots import generate_report_plots
+from .plots import generate_all_plots
 matplotlib.rcParams.update(MATPLOTLIB_DEFAULTS)
 
 
@@ -146,7 +146,7 @@ class TrainingPredictionReport:
         pdf_path = self.log_dir / pdf_filename
         elements = []
 
-        elements.append(ReportText(f"<b>Podsumowanie eksperymentu</b>", getSampleStyleSheet()['Title'], spacer=12))
+        elements.append(ReportText(f"<b>Podsumowanie treningu i predykcji</b>", getSampleStyleSheet()['Title'], spacer=12))
         elements.append(ReportText(f"Model: <b>{self.experiment_setup.get('Model', '-')}</b>"))
         elements.append(ReportText(f"Typ modelu: <b>{self.experiment_setup.get('Typ modelu', '-')}</b>"))
         loss_name = self.log_dir.name.split("_")[1] if "_" in self.log_dir.name else self.experiment_setup.get("loss_type", "-")
@@ -193,7 +193,7 @@ class TrainingPredictionReport:
 
         # --- wykresy --- (AUTOMATYZACJA)
         self.log_dir.mkdir(parents=True, exist_ok=True)
-        plot_files = generate_report_plots(self.metrics, self.log_dir)
+        plot_files = generate_all_plots(self.metrics, self.log_dir)
         elements.append(ReportText("<b>Wykresy metryk po epokach</b>", getSampleStyleSheet()['Title']))
 
         # Dodajemy wykresy parami w wierszu (np. dwa na wiersz)

@@ -10,3 +10,4 @@ pillow~=11.1.0
 pandas~=2.2.3
 seaborn~=0.13.2
 pytest~=8.4.0
+reportlab~=4.4.2
