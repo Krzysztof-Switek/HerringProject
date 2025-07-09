@@ -13,8 +13,17 @@ def init_metrics_logger(trainer, log_dir, full_name):
     biologic_labels = [trainer.population_mapper.to_pop(idx) for idx in class_labels]  # 🟢 ZMIANA
     class_headers = [f"Train Class {bio} (idx {idx})" for bio, idx in zip(biologic_labels, class_labels)]  # 🟢 ZMIANA
 
+    # 🟣 ZMIANA multitask: Dodajemy dodatkowe kolumny do nagłówka
+    multitask_headers = [
+        'Train Classification Loss', 'Val Classification Loss',
+        'Train Regression Loss', 'Val Regression Loss'
+    ]
+
     trainer.metrics_writer.writerow([
         'Epoch', 'Train Samples', 'Val Samples', *class_headers,
+        # --- multitask columns
+        *multitask_headers,
+        # --- klasyczne metryki
         'Train Loss', 'Train Accuracy', 'Train Precision', 'Train Recall', 'Train F1', 'Train AUC',
         'Val Loss', 'Val Accuracy', 'Val Precision', 'Val Recall', 'Val F1', 'Val AUC',
         'Train Time (s)'
@@ -41,8 +50,19 @@ def log_epoch_metrics(trainer, epoch, loss_name, train_metrics, val_metrics, epo
           f"F1: {val_metrics['f1']:.2f}, AUC: {val_metrics['auc']:.2f}")
     print(f"Train class dist: {class_dist_str}, Time: {epoch_time:.1f}s")  # 🟢 ZMIANA
 
+    # 🟣 ZMIANA multitask: Pobierz dodatkowe metryki, domyślnie None lub 0 jeśli nie istnieją
+    train_cls_loss = train_metrics.get("classification_loss", None)
+    val_cls_loss = val_metrics.get("classification_loss", None)
+    train_reg_loss = train_metrics.get("regression_loss", None)
+    val_reg_loss = val_metrics.get("regression_loss", None)
+
+    # 🟣 Możesz też dać domyślnie 0.0, ale None bardziej czytelne w csv gdy brak
+
     trainer.metrics_writer.writerow([
         f"{loss_name}-e{epoch + 1}", train_samples, val_samples, *train_class_counts,
+        # --- multitask columns
+        train_cls_loss, val_cls_loss, train_reg_loss, val_reg_loss,
+        # --- klasyczne metryki
         train_metrics["loss"], train_metrics["acc"], train_metrics["precision"], train_metrics["recall"],
         train_metrics["f1"], train_metrics["auc"], val_metrics["loss"], val_metrics["acc"],
         val_metrics["precision"], val_metrics["recall"], val_metrics["f1"], val_metrics["auc"],
