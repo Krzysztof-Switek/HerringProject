@@ -53,13 +53,14 @@ def log_epoch_metrics(trainer, epoch, loss_name, train_metrics, val_metrics, epo
           f"F1: {val_metrics['f1']:.2f}, AUC: {val_metrics['auc']:.2f}")
     print(f"Train class dist: {class_dist_str}, Time: {epoch_time:.1f}s")  # 🟢 ZMIANA
 
-    # 🟣 ZMIANA multitask: Pobierz dodatkowe metryki, domyślnie None lub 0 jeśli nie istnieją
-    train_cls_loss = train_metrics.get("classification_loss", None)
-    val_cls_loss = val_metrics.get("classification_loss", None)
-    train_reg_loss = train_metrics.get("regression_loss", None)
-    val_reg_loss = val_metrics.get("regression_loss", None)
+    # 🟣 ZMIANA multitask: Pobierz dodatkowe metryki, domyślnie None lub np.nan
+    # train_epoch/validate now return these keys with float values or np.nan
+    train_cls_loss = train_metrics.get("classification_loss", np.nan) # Default to np.nan
+    val_cls_loss = val_metrics.get("classification_loss", np.nan)   # Corrected: use val_metrics
+    train_reg_loss = train_metrics.get("regression_loss", np.nan) # Default to np.nan
+    val_reg_loss = val_metrics.get("regression_loss", np.nan)     # Corrected: use val_metrics
 
-    # 🟣 Możesz też dać domyślnie 0.0, ale None bardziej czytelne w csv gdy brak
+    # Using np.nan for missing values is good for CSV (writes "nan") and for TensorBoard checks.
 
     trainer.metrics_writer.writerow([
         f"{loss_name}-e{epoch + 1}", train_samples, val_samples, *train_class_counts,
@@ -100,13 +101,13 @@ def log_epoch_metrics(trainer, epoch, loss_name, train_metrics, val_metrics, epo
 
         # Dodatkowo logowanie komponentów strat, jeśli są dostępne (zgodnie z istniejącą logiką)
         if trainer.cfg.multitask_model.log_loss_components:
-            if train_cls_loss is not None: # classification_loss
+            if not np.isnan(train_cls_loss):
                  trainer.writer.add_scalar(f'Loss_Train/classification_{loss_name}', train_cls_loss, epoch)
-            if train_reg_loss is not None: # regression_loss
+            if not np.isnan(train_reg_loss):
                  trainer.writer.add_scalar(f'Loss_Train/regression_{loss_name}', train_reg_loss, epoch)
-            if val_cls_loss is not None:
+            if not np.isnan(val_cls_loss):
                  trainer.writer.add_scalar(f'Loss_Val/classification_{loss_name}', val_cls_loss, epoch)
-            if val_reg_loss is not None:
+            if not np.isnan(val_reg_loss):
                  trainer.writer.add_scalar(f'Loss_Val/regression_{loss_name}', val_reg_loss, epoch)
 
 def save_best_model(trainer, current_composite_score, val_cm, model_name, loss_name, checkpoint_dir):

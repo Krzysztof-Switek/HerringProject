@@ -65,7 +65,12 @@ def calculate_f1_subgroup(targets, predictions, mask, population_mapper):
 
 def train_epoch(model, device, dataloader, loss_fn, optimizer, population_mapper):
     model.train()
-    stats = {'loss': 0.0, 'correct': 0, 'total': 0}
+    stats = {
+        'loss': 0.0, 'correct': 0, 'total': 0,
+        'classification_loss': 0.0, 'regression_loss': 0.0
+    }
+    # Count batches to normalize component losses if they are present
+    batches_with_component_losses = 0
     all_targets, all_preds, all_probs = [], [], []
     mapper = population_mapper
 
@@ -79,18 +84,31 @@ def train_epoch(model, device, dataloader, loss_fn, optimizer, population_mapper
         optimizer.zero_grad()
         outputs = model(inputs)
 
-        loss = loss_fn(outputs, targets, meta)
-        loss.backward()
+        # Check if the model is in multitask mode based on output type
+        is_multitask_batch = isinstance(outputs, tuple)
+
+        loss_output = loss_fn(outputs, targets, meta)
+
+        if is_multitask_batch and isinstance(loss_output, tuple) and len(loss_output) == 3:
+            combined_loss, cls_loss_comp, reg_loss_comp = loss_output
+            stats['classification_loss'] += cls_loss_comp.item()
+            stats['regression_loss'] += reg_loss_comp.item()
+            batches_with_component_losses += 1
+        else: # Single task loss or MultiTaskLossWrapper not returning components as expected
+            combined_loss = loss_output
+            # cls_loss_comp and reg_loss_comp will not be added to stats for this batch
+
+        combined_loss.backward()
         optimizer.step()
 
-        logits = outputs[0] if isinstance(outputs, tuple) else outputs
+        logits = outputs[0] if is_multitask_batch else outputs
         probs = torch.softmax(logits, dim=1)  # [batch, num_classes]
         preds = logits.argmax(dim=1)
         targets_np = targets.cpu().numpy()
         preds_np = preds.detach().cpu().numpy()
         probs_np = probs.detach().cpu().numpy()
 
-        stats['loss'] += loss.item()
+        stats['loss'] += combined_loss.item()
         stats['correct'] += int(np.sum(preds_np == targets_np))
         stats['total'] += targets.size(0)
 
@@ -100,7 +118,7 @@ def train_epoch(model, device, dataloader, loss_fn, optimizer, population_mapper
 
     print(f"✅ [train_epoch] Epoka zakończona. Obliczam metryki...")
 
-    loss = stats['loss'] / len(dataloader)
+    avg_loss = stats['loss'] / len(dataloader)
     acc = 100. * stats['correct'] / stats['total']
     all_targets_pop = [mapper.to_pop(idx) for idx in all_targets]
     all_preds_pop = [mapper.to_pop(idx) for idx in all_preds]
@@ -110,12 +128,10 @@ def train_epoch(model, device, dataloader, loss_fn, optimizer, population_mapper
     precision = precision_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)
     recall = recall_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)
     f1 = f1_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)
-    auc = roc_auc_score(all_targets, all_probs, multi_class='ovr')
+    auc = roc_auc_score(all_targets, all_probs, multi_class='ovr') # uses original class indices for targets
 
-    print(f"    [train_epoch] Loss: {loss:.4f} | Acc: {acc:.2f}% | F1: {f1:.3f} | AUC: {auc:.3f}")
-
-    return {
-        "loss": loss,
+    metrics_results = {
+        "loss": avg_loss,
         "acc": acc,
         "precision": precision,
         "recall": recall,
@@ -124,13 +140,27 @@ def train_epoch(model, device, dataloader, loss_fn, optimizer, population_mapper
         "targets": all_targets_pop
     }
 
+    # Add component losses if they were collected
+    if batches_with_component_losses > 0:
+        metrics_results["classification_loss"] = stats['classification_loss'] / batches_with_component_losses
+        metrics_results["regression_loss"] = stats['regression_loss'] / batches_with_component_losses
+        print(f"    [train_epoch] Loss: {avg_loss:.4f} (Cls: {metrics_results['classification_loss']:.4f}, Reg: {metrics_results['regression_loss']:.4f}) | Acc: {acc:.2f}% | F1: {f1:.3f} | AUC: {auc:.3f}")
+    else:
+        print(f"    [train_epoch] Loss: {avg_loss:.4f} | Acc: {acc:.2f}% | F1: {f1:.3f} | AUC: {auc:.3f}")
+
+    return metrics_results
+
 
 def validate(model, device, dataloader, loss_fn, population_mapper, cfg): # Dodano cfg
     model.eval()
-    stats = {'loss': 0.0, 'correct': 0, 'total': 0}
+    stats = {
+        'loss': 0.0, 'correct': 0, 'total': 0,
+        'classification_loss': 0.0, 'regression_loss': 0.0
+    }
+    batches_with_component_losses = 0
     all_targets, all_preds, all_probs = [], [], []
     all_meta_data = []
-    all_age_preds = [] # <-- NOWA LINIA: do przechowywania predykcji wieku
+    all_age_preds = []
     mapper = population_mapper
 
     print(f"\n⏩ [validate] Start walidacji. Liczba batchy: {len(dataloader)}")
@@ -150,18 +180,27 @@ def validate(model, device, dataloader, loss_fn, population_mapper, cfg): # Doda
             inputs, targets = inputs.to(device), targets.to(device)
             outputs = model(inputs)
 
-            loss = loss_fn(outputs, targets, meta)
-            stats['loss'] += loss.item()
+            is_multitask_batch = isinstance(outputs, tuple)
 
-            if isinstance(outputs, tuple):
+            loss_output = loss_fn(outputs, targets, meta)
+
+            if is_multitask_batch and isinstance(loss_output, tuple) and len(loss_output) == 3:
+                combined_loss, cls_loss_comp, reg_loss_comp = loss_output
+                stats['classification_loss'] += cls_loss_comp.item()
+                stats['regression_loss'] += reg_loss_comp.item()
+                batches_with_component_losses += 1
+            else: # Single task loss or MultiTaskLossWrapper not returning components as expected
+                combined_loss = loss_output
+
+            stats['loss'] += combined_loss.item()
+
+            if is_multitask_batch:
                 logits = outputs[0]
                 age_predictions_batch = outputs[1]
                 all_age_preds.extend(age_predictions_batch.detach().cpu().numpy())
             else:
                 logits = outputs
-                # W przypadku braku multitask, można dodać placeholder np. listę NaN lub pustą listę,
-                # ale MAE nie będzie obliczane, więc można to obsłużyć później.
-                # Na razie zakładamy, że jeśli chcemy MAE, to model jest multitask.
+                # No age predictions if not multitask
 
             probs = torch.softmax(logits, dim=1)
             preds = logits.argmax(dim=1)
@@ -176,10 +215,6 @@ def validate(model, device, dataloader, loss_fn, population_mapper, cfg): # Doda
             all_preds.extend(preds_np)
             all_probs.extend(probs_np[range(len(preds_np)), preds_np])
 
-            # Meta jest słownikiem, gdzie klucze 'wiek' i 'populacja'
-            # mapują na tensory zawierające dane dla całego batcha.
-            # Musimy przekształcić to z powrotem na listę słowników,
-            # po jednym dla każdej próbki w batchu.
             batch_meta_ages = meta['wiek'].cpu().tolist()
             batch_meta_populations = meta['populacja'].cpu().tolist()
 
@@ -191,7 +226,7 @@ def validate(model, device, dataloader, loss_fn, population_mapper, cfg): # Doda
 
     print(f"✅ [validate] Walidacja zakończona. Obliczam metryki...")
 
-    loss = stats['loss'] / len(dataloader)
+    avg_loss = stats['loss'] / len(dataloader)
     acc = 100. * stats['correct'] / stats['total']
     all_targets_pop = [mapper.to_pop(idx) for idx in all_targets]
     all_preds_pop = [mapper.to_pop(idx) for idx in all_preds]
@@ -201,10 +236,33 @@ def validate(model, device, dataloader, loss_fn, population_mapper, cfg): # Doda
     precision = precision_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)
     recall = recall_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)
     f1 = f1_score(all_targets_pop, all_preds_pop, labels=mapper.all_pops(), zero_division=0)
+    # Use original class indices for AUC targets
     auc = roc_auc_score(all_targets, all_probs, multi_class='ovr')
     cm = confusion_matrix(all_targets_pop, all_preds_pop, labels=mapper.all_pops())
 
-    # Obliczanie MAE dla wieku
+    # --- Start of metrics calculation section ---
+    metrics_results = {
+        "loss": avg_loss,
+        "acc": acc,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "auc": auc,
+        "cm": cm,
+        "targets": all_targets_pop, # These are population numbers, not indices
+        "meta_data": all_meta_data, # For potential further analysis
+        # mae_age, f1_pop2_age3_6, composite_score will be added below
+    }
+
+    # Add component losses if they were collected
+    if batches_with_component_losses > 0:
+        metrics_results["classification_loss"] = stats['classification_loss'] / batches_with_component_losses
+        metrics_results["regression_loss"] = stats['regression_loss'] / batches_with_component_losses
+    else: # Ensure keys exist even if not multitask, for consistent logging
+        metrics_results["classification_loss"] = np.nan
+        metrics_results["regression_loss"] = np.nan
+
+    # Obliczanie MAE dla wieku (existing logic)
     mae_age = np.nan
     if all_age_preds and all_meta_data:
         true_ages = [m['wiek'] for m in all_meta_data]
@@ -311,23 +369,26 @@ def validate(model, device, dataloader, loss_fn, population_mapper, cfg): # Doda
 
     except AttributeError as e:
         print(f"    [validate] Błąd przy odczycie wag dla composite_score z konfiguracji: {e}. Composite_score pozostanie NaN.")
+        # Ensure composite_score is set to np.nan if not already
+        composite_score = np.nan
     except Exception as e:
         print(f"    [validate] Nieoczekiwany błąd podczas obliczania composite_score: {e}. Composite_score pozostanie NaN.")
+        composite_score = np.nan
 
+    # Add remaining calculated metrics to the results dictionary
+    metrics_results["mae_age"] = mae_age
+    metrics_results["f1_pop2_age3_6"] = f1_pop2_age3_6
+    metrics_results["composite_score"] = composite_score
 
-    print(f"    [validate] Loss: {loss:.4f} | Acc: {acc:.2f}% | F1: {f1:.3f} | AUC: {auc:.3f}")
+    # Final print statement including component losses if available
+    cls_loss_str = f"Cls: {metrics_results['classification_loss']:.4f}, " if not np.isnan(metrics_results['classification_loss']) else ""
+    reg_loss_str = f"Reg: {metrics_results['regression_loss']:.4f}" if not np.isnan(metrics_results['regression_loss']) else ""
+    component_loss_str = ""
+    if cls_loss_str or reg_loss_str:
+        component_loss_str = f" ({cls_loss_str}{reg_loss_str})".strip(", ")
+        if component_loss_str == "()": component_loss_str = "" # Clean up if both were nan and resulted in " ()"
+        elif component_loss_str.endswith(", )"): component_loss_str = component_loss_str[:-3] + ")" # if one was nan e.g. (Cls: X.XXX, )
 
-    return {
-        "loss": loss,
-        "acc": acc,
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "auc": auc,
-        "cm": cm,
-        "targets": all_targets_pop,
-        "meta_data": all_meta_data,
-        "mae_age": mae_age,
-        "f1_pop2_age3_6": f1_pop2_age3_6,
-        "composite_score": composite_score # <-- NOWA LINIA: dodanie composite_score
-    }
+    print(f"    [validate] Loss: {metrics_results['loss']:.4f}{component_loss_str} | Acc: {metrics_results['acc']:.2f}% | F1: {metrics_results['f1']:.3f} | AUC: {metrics_results['auc']:.3f} | MAE Age: {mae_age:.3f} | Comp Score: {composite_score:.3f}")
+
+    return metrics_results
