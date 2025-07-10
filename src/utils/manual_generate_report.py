@@ -25,33 +25,31 @@ def main():
 
     print(f"Używam log_dir: {log_dir}")
 
-    # Spróbuj załadować params.yaml z log_dir
-    params_yaml_path = log_dir / "params.yaml"
-    config_to_use_for_report_path = None # To będzie ścieżka do pliku config (params.yaml lub globalny)
-    cfg_for_report_obj = None # To będzie załadowany obiekt OmegaConf
+    # Załaduj globalny config jako bazę
+    global_config_path = project_root / "src" / "config" / "config.yaml"
+    if not global_config_path.exists():
+        raise FileNotFoundError(f"Globalny plik konfiguracyjny {global_config_path} nie znaleziony.")
+    cfg_base = OmegaConf.load(global_config_path)
+    print(f"Załadowano bazowy globalny config: {global_config_path}")
 
+    # Spróbuj załadować params.yaml z log_dir (minimalistyczne parametry przebiegu)
+    params_yaml_path = log_dir / "params.yaml"
+    run_specific_params = None
     if params_yaml_path.exists():
         print(f"Znaleziono params.yaml w katalogu logów: {params_yaml_path}")
-        cfg_for_report_obj = OmegaConf.load(params_yaml_path)
-        config_to_use_for_report_path = params_yaml_path
-        print("Używam konfiguracji z params.yaml (zawartej w raporcie).")
+        run_specific_params = OmegaConf.load(params_yaml_path)
+        print(f"Załadowano parametry specyficzne dla przebiegu z: {params_yaml_path}")
     else:
-        print(f"Nie znaleziono params.yaml w {log_dir}. Używam globalnego config.yaml.")
-        global_config_path = project_root / "src" / "config" / "config.yaml"
-        if not global_config_path.exists():
-            raise FileNotFoundError(f"Globalny plik konfiguracyjny {global_config_path} nie znaleziony.")
-        cfg_for_report_obj = OmegaConf.load(global_config_path)
-        config_to_use_for_report_path = global_config_path
+        print(f"Nie znaleziono params.yaml w {log_dir}. Raport będzie bazował tylko na globalnym configu i nazwie katalogu.")
 
-    if cfg_for_report_obj is None: # Powinno być już obsłużone przez FileNotFoundError powyżej
-        raise RuntimeError("Nie udało się załadować żadnej konfiguracji.")
-
-    # Utwórz PathManager z właściwą konfiguracją (tą, która będzie użyta w raporcie)
-    path_manager = PathManager(project_root, cfg_for_report_obj)
+    # PathManager powinien być inicjalizowany z bazową konfiguracją,
+    # ponieważ ścieżki do danych (metadata, root_dir) są zazwyczaj w głównym configu.
+    # Jeśli params.yaml miałby nadpisywać te ścieżki, logika musiałaby być bardziej złożona.
+    # Na razie zakładamy, że params.yaml dostarcza tylko metadanych do wyświetlenia.
+    path_manager = PathManager(project_root, cfg_base)
     metadata_path = path_manager.metadata_file()
 
-    print(f"Plik metadata użyty w raporcie (zgodnie z wybraną konfiguracją): {metadata_path}")
-    print(f"Plik konfiguracyjny użyty w raporcie: {config_to_use_for_report_path}")
+    print(f"Plik metadata użyty w raporcie (z globalnego configu): {metadata_path}")
 
     # Wyszukaj wymagane pliki w log_dir
     predictions_path = next(log_dir.glob("*_predictions.xlsx"), None)
@@ -69,9 +67,11 @@ def main():
     # Generowanie raportu
     report = TrainingPredictionReport(
         log_dir=log_dir,
-        config_path=config_to_use_for_report_path, # Użyj ścieżki do params.yaml lub globalnego configu
+        # config_path nie jest już potrzebny, jeśli przekazujemy załadowane obiekty
+        base_config_obj=cfg_base,             # Przekaż załadowany globalny config
+        run_params_obj=run_specific_params,   # Przekaż załadowane params.yaml (może być None)
         predictions_path=predictions_path,
-        metadata_path=metadata_path, # Ta ścieżka jest już zgodna z cfg_for_report_obj dzięki nowemu PathManagerowi
+        metadata_path=metadata_path,
         metrics_path=metrics_path,
         augmentation_path=augmentation_path
     )

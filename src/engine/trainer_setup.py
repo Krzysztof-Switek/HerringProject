@@ -94,14 +94,39 @@ def run_training_loop(trainer):
 
         init_metrics_logger(trainer, log_dir, full_name)
 
-        # Zapis konfiguracji użytej dla tego przebiegu do params.yaml
-        try:
-            params_file_path = log_dir / "params.yaml"
-            OmegaConf.save(config=trainer.cfg, f=str(params_file_path))
-            print(f"💾 Zapisano konfigurację przebiegu do: {params_file_path}")
-        except Exception as e:
-            print(f"⚠️ Nie udało się zapisać konfiguracji przebiegu (params.yaml): {e}")
+        # Zapis minimalistycznej konfiguracji przebiegu do params.yaml
+        params_to_save = {
+            'model_name_used': model_name,  # Używamy zmiennej model_name zdefiniowanej wcześniej w pętli
+            'model_mode': mode_type,    # Używamy zmiennej mode_type zdefiniowanej wcześniej w pętli
+            'loss_function_used': loss_name, # Bieżąca funkcja straty z pętli
+            'run_timestamp': timestamp  # Timestamp dla tego konkretnego przebiegu (loss_name + model_mode)
+        }
 
+        # Dodaj wagi composite_score, jeśli model jest multitask i wagi są zdefiniowane
+        if mode_type == "multitask" and \
+           hasattr(trainer.cfg, 'multitask_model') and \
+           trainer.cfg.multitask_model and \
+           hasattr(trainer.cfg.multitask_model, 'metrics_weights') and \
+           trainer.cfg.multitask_model.metrics_weights:
+            try:
+                weights = trainer.cfg.multitask_model.metrics_weights
+                params_to_save['composite_score_weights'] = {
+                    'alpha': weights.alpha,
+                    'beta': weights.beta,
+                    'gamma': weights.gamma
+                }
+            except Exception as e:
+                print(f"⚠️ Nie udało się pobrać wag composite_score do params.yaml: {e}")
+
+        params_file_path = log_dir / "params.yaml"
+        try:
+            omega_conf_to_save = OmegaConf.create(params_to_save)
+            OmegaConf.save(config=omega_conf_to_save, f=str(params_file_path))
+            print(f"💾 Zapisano minimalistyczną konfigurację przebiegu (model, tryb, loss, timestamp, wagi) do: {params_file_path}")
+            if trainer.debug_mode: # Użyj trainer.debug_mode
+                print(f"   Zawartość params.yaml dla debugu: {OmegaConf.to_yaml(omega_conf_to_save)}")
+        except Exception as e:
+            print(f"⚠️ Nie udało się zapisać minimalistycznej konfiguracji przebiegu (params.yaml): {e}")
 
         for epoch in range(trainer.cfg.training.epochs):
             start_time = time.time()
