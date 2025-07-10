@@ -3,6 +3,7 @@ from datetime import datetime
 import torch
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
+from omegaconf import OmegaConf # <-- Dodano import
 from models.model import HerringModel
 from models.multitask_model import MultiTaskHerringModel
 from engine.loss_utills import LossFactory, MultiTaskLossWrapper
@@ -86,11 +87,21 @@ def run_training_loop(trainer):
 
         trainer.writer = SummaryWriter(log_dir=str(log_dir))
         trainer.log_dir = log_dir
-        trainer.best_acc = 0.0
+        # trainer.best_acc = 0.0 # Zastąpione przez best_score
+        trainer.best_score = -float('inf') # Inicjalizacja dla composite_score
         trainer.early_stop_counter = 0
-        trainer.best_cm = None
+        trainer.best_cm = None # Pozostaje, jeśli chcemy logować CM najlepszego modelu
 
         init_metrics_logger(trainer, log_dir, full_name)
+
+        # Zapis konfiguracji użytej dla tego przebiegu do params.yaml
+        try:
+            params_file_path = log_dir / "params.yaml"
+            OmegaConf.save(config=trainer.cfg, f=str(params_file_path))
+            print(f"💾 Zapisano konfigurację przebiegu do: {params_file_path}")
+        except Exception as e:
+            print(f"⚠️ Nie udało się zapisać konfiguracji przebiegu (params.yaml): {e}")
+
 
         for epoch in range(trainer.cfg.training.epochs):
             start_time = time.time()
@@ -109,7 +120,8 @@ def run_training_loop(trainer):
                 device=trainer.device,
                 dataloader=val_loader,
                 loss_fn=loss_fn,
-                population_mapper=trainer.population_mapper
+                population_mapper=trainer.population_mapper,
+                cfg=trainer.cfg # <-- Przekazanie konfiguracji
             )
 
             epoch_time = time.time() - start_time
@@ -123,11 +135,14 @@ def run_training_loop(trainer):
                 epoch_time
             )
 
-            val_acc = val_metrics["acc"]
+            # Pobieramy composite_score z metryk walidacyjnych
+            current_composite_score = val_metrics.get("composite_score", np.nan)
+            # Jeśli composite_score to NaN, save_best_model sobie z tym poradzi
+
             trainer, improved = save_best_model(
                 trainer,
-                val_acc,
-                val_metrics["cm"],
+                current_composite_score, # Przekazujemy composite_score
+                val_metrics["cm"],       # CM nadal jest przydatne
                 model_name,
                 loss_name,
                 checkpoint_dir

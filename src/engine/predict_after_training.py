@@ -6,6 +6,8 @@ from torchvision import transforms
 from models.model import HerringModel
 from models.multitask_model import MultiTaskHerringModel
 from utils.population_mapper import PopulationMapper  # 🟢 DODANO
+from omegaconf import OmegaConf # <-- Dodano import
+from pathlib import Path # <-- Dodano import
 
 def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, log_dir, full_name):
     import pandas as pd
@@ -17,9 +19,50 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, l
     from models.multitask_model import MultiTaskHerringModel
     from utils.population_mapper import PopulationMapper
 
-    cfg = path_manager.cfg
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Konwersja log_dir do Path, jeśli jest stringiem
+    log_dir_path = Path(log_dir)
+    params_file = log_dir_path / "params.yaml"
 
+    if params_file.exists():
+        print(f"Ładowanie konfiguracji z pliku: {params_file}")
+        cfg = OmegaConf.load(params_file)
+    else:
+        print(f"OSTRZEŻENIE: Plik konfiguracyjny {params_file} nie znaleziony. Używam konfiguracji z path_manager.")
+        if path_manager is None or path_manager.cfg is None:
+            raise ValueError("Nie można załadować konfiguracji: params.yaml nie istnieje, a path_manager lub path_manager.cfg jest None.")
+        cfg = path_manager.cfg
+
+    # PathManager może nadal być potrzebny do uzyskania project_root, jeśli ścieżki w cfg są względne
+    # lub do innych zadań. Jeśli path_manager jest None, a potrzebny, to błąd.
+    if path_manager is None and not params_file.exists():
+        # Jeśli nie ma params.yaml i nie ma path_manager, to nie mamy ani cfg, ani sposobu na ścieżki.
+        raise ValueError("Nie można załadować konfiguracji ani uzyskać ścieżek: params.yaml nie istnieje, a path_manager jest None.")
+
+    if path_manager is None and params_file.exists():
+        # Mamy cfg z params.yaml, ale nie mamy project_root do utworzenia nowego PathManagera.
+        # W tej sytuacji zakładamy, że ścieżki w params.yaml są absolutne lub praca bez PathManagera jest niemożliwa.
+        # To jest mało prawdopodobny scenariusz, jeśli funkcja jest wywoływana z trainer_setup.
+        # Dla bezpieczeństwa, rzućmy błąd, jeśli path_manager jest potrzebny do określenia project_root.
+        # Można by zmodyfikować PathManager, aby nie wymagał project_root, jeśli ścieżki w cfg są absolutne.
+        # Lub params.yaml musiałby przechowywać project_root.
+        # Na razie: jeśli params.yaml istnieje, ale path_manager nie, to jest to problem dla PathManagera.
+        # Chyba że cfg z params.yaml zawiera wszystkie potrzebne ścieżki jako absolutne.
+        print("OSTRZEŻENIE: path_manager jest None. Ścieżki w załadowanej konfiguracji cfg muszą być absolutne lub poprawnie skonfigurowane.")
+        # W tej sytuacji, jeśli cfg.data.root_dir i cfg.data.metadata_file są np. względne, to PathManager by ich nie rozwiązał poprawnie.
+        # Dla uproszczenia, na razie zakładamy, że jeśli path_manager jest None, to cfg musi zawierać absolutne ścieżki.
+        # Lepszym rozwiązaniem byłoby przekazanie project_root jako argumentu.
+        # Na razie, jeśli path_manager jest None, nie tworzymy nowego. To spowoduje błąd później, jeśli metody path_manager będą wywołane.
+        # To jest złe. PathManager jest potrzebny.
+        raise ValueError("path_manager jest None. Jest on wymagany do działania tej funkcji.")
+
+
+    # Utwórz nową instancję PathManager z załadowaną konfiguracją cfg
+    # Potrzebujemy project_root z oryginalnego path_manager
+    # To jest kluczowe: oryginalny path_manager dostarcza project_root.
+    from utils.path_manager import PathManager as PM_local # Uniknięcie konfliktu nazw, jeśli PathManager byłby też tu importowany
+    current_pm = PM_local(project_root=path_manager.project_root, cfg=cfg)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     population_mapper = PopulationMapper(cfg.data.active_populations)
 
     # Ustal typ modelu
@@ -36,18 +79,20 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, l
         model.load_state_dict(checkpoint)
     model.eval()
 
+    # Użyj cfg (załadowanego z params.yaml lub fallback) do określenia image_size
+    image_size_to_use = cfg.multitask_model.backbone_model.image_size if is_multitask else cfg.base_model.image_size
     transform = transforms.Compose([
-        transforms.Resize(cfg.base_model.image_size),
+        transforms.Resize(image_size_to_use), # Użyj poprawnego image_size
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-    excel_path = path_manager.metadata_file()
+    excel_path = current_pm.metadata_file() # Użyj current_pm
     df = pd.read_excel(excel_path)
-    if "FilePath" not in df.columns:
+    if "FilePath" not in df.columns: # Pozostaje bez zmian
         raise ValueError("Brakuje kolumny 'FilePath' zawierającej ścieżki do obrazów")
 
-    data_root = path_manager.data_root()
+    data_root = current_pm.data_root() # Użyj current_pm
     folders = [f"train/{pop}" for pop in population_mapper.active_populations] + \
               [f"val/{pop}" for pop in population_mapper.active_populations] + \
               [f"test/{pop}" for pop in population_mapper.active_populations]

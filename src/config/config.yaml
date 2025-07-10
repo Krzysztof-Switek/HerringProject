@@ -46,6 +46,10 @@ multitask_model:
       classification: 1.0
       age: 0.3
   log_loss_components: true
+  metrics_weights:                  # NOWA SEKCJA
+    alpha: 0.34                     # Waga dla globalnego F1-score
+    beta: 0.33                      # Waga dla (1 - MAE_normalized)
+    gamma: 0.33                     # Waga dla F1_p2_y3_6
 
 augmentation:
   rotation: 30
