@@ -13,19 +13,21 @@ matplotlib.rcParams.update(MATPLOTLIB_DEFAULTS)
 
 
 class TrainingPredictionReport:
-    def __init__(self, log_dir, config_path, predictions_path, metadata_path,
-                 metrics_path=None, augmentation_path=None):
+    def __init__(self, log_dir, base_config_obj, predictions_path, metadata_path,
+                 run_params_obj=None, metrics_path=None, augmentation_path=None):
         self.log_dir = Path(log_dir)
-        self.config_path = Path(config_path)
+        self.base_config = base_config_obj # Zmieniono config_path na base_config_obj
+        self.run_params = run_params_obj     # Nowy parametr dla params.yaml
         self.predictions_path = Path(predictions_path)
         self.metadata_path = Path(metadata_path)
         self.metrics_path = Path(metrics_path) if metrics_path else None
         self.augmentation_path = Path(augmentation_path) if augmentation_path else None
+
         self.metrics = None
         self.predictions = None
         self.metadata = None
         self.augmentation = None
-        self.config = None
+        # self.config zostanie przypisane w load_data do self.base_config
 
     def load_data(self):
         if self.metrics_path and self.metrics_path.exists():
@@ -43,30 +45,64 @@ class TrainingPredictionReport:
             aug_files = list(self.log_dir.glob("augmentation_summary_*.csv"))
             self.augmentation = pd.read_csv(aug_files[0]) if aug_files else None
 
-        import yaml
-        with open(self.config_path, "r") as f:
-            self.config = yaml.safe_load(f)
+        # self.config (używane w extract_experiment_setup) będzie teraz self.base_config
+        # Nie ma potrzeby ładowania z pliku, bo obiekt jest już przekazany.
+        # self.run_params jest już ustawione w __init__
 
     def extract_experiment_setup(self):
-        cfg = self.config
+        # Używamy self.base_config jako głównego źródła, a self.run_params do nadpisywania/uzupełniania
+        cfg = self.base_config
+        run_cfg = self.run_params # Może być None (obiekt OmegaConf lub None)
+
         setup = {}
-        # Model
-        if "base_model" in cfg and "base_model" in cfg["base_model"]:
+
+        # Użyj informacji z run_cfg (params.yaml) jeśli dostępne, inaczej fallback na cfg (base_config)
+        if run_cfg and hasattr(run_cfg, 'model_name_used'):
+            setup["Model"] = run_cfg.model_name_used
+        elif "base_model" in cfg and "base_model" in cfg["base_model"]: # Fallback
             setup["Model"] = cfg["base_model"]["base_model"]
-        elif "multitask_model" in cfg and "backbone_model" in cfg["multitask_model"]:
+        elif "multitask_model" in cfg and "backbone_model" in cfg["multitask_model"]: # Fallback
             setup["Model"] = cfg["multitask_model"]["backbone_model"]["model_name"]
         else:
-            setup["Model"] = "NIEZNANY"
+            setup["Model"] = "NIEZNANY (brak w params.yaml i base config)"
 
-        # Typ modelu
-        setup["Typ modelu"] = (
-            "multitask"
-            if "multitask_model" in cfg and cfg["multitask_model"].get("use", False)
-            else "klasyfikacja"
-        )
+        if run_cfg and hasattr(run_cfg, 'model_mode'):
+            # Mapowanie 'base' na 'klasyfikacja' dla spójności wyświetlania, jeśli trzeba
+            mode_map = {"base": "klasyfikacja (base)", "multitask": "multitask", "expert": "expert"}
+            setup["Typ modelu"] = mode_map.get(run_cfg.model_mode, run_cfg.model_mode)
+        elif "multitask_model" in cfg and cfg.multitask_model.get("use", False): # Fallback
+            setup["Typ modelu"] = "multitask"
+        else: # Fallback
+            setup["Typ modelu"] = "klasyfikacja (base)"
 
-        # Populacje
-        active_pops = cfg["data"].get("active_populations", [])
+        # Funkcja straty - powinna być w `run_cfg` jako `loss_function_used`
+        # W raporcie PDF jest też używana `loss_name` wyciągana z `self.log_dir.name`
+        # Tutaj dodajemy do setup dla spójności, jeśli jest w run_cfg.
+        if run_cfg and hasattr(run_cfg, 'loss_function_used'):
+            setup["Funkcja straty (z params.yaml)"] = run_cfg.loss_function_used
+
+        # Wagi Composite Score (jeśli są w run_cfg)
+        if run_cfg and hasattr(run_cfg, 'composite_score_weights'):
+            weights = getattr(run_cfg, 'composite_score_weights', None) # Użyj getattr dla bezpieczeństwa
+            if weights and hasattr(weights, 'alpha'): # Sprawdź czy 'weights' nie jest None i ma atrybuty
+                setup["Wagi Composite Score (alpha)"] = getattr(weights, 'alpha', 'N/A')
+                setup["Wagi Composite Score (beta)"] = getattr(weights, 'beta', 'N/A')
+                setup["Wagi Composite Score (gamma)"] = getattr(weights, 'gamma', 'N/A')
+
+        # Użyta funkcja straty
+        default_loss_from_base = "-"
+        if hasattr(cfg, 'training') and cfg.training and hasattr(cfg.training, 'loss_type'):
+            loss_type_val = cfg.training.loss_type
+            if isinstance(loss_type_val, (list, tuple)) and len(loss_type_val) > 0: # OmegaConf list jest ListConfig
+                default_loss_from_base = loss_type_val[0]
+            elif isinstance(loss_type_val, str):
+                default_loss_from_base = loss_type_val
+
+        setup["Użyta funkcja straty"] = getattr(run_cfg, 'loss_function_used', default_loss_from_base)
+
+
+        # Pozostałe parametry z base_config (cfg)
+        active_pops = cfg.data.get("active_populations", [])
         setup["Liczba klas populacji"] = len(active_pops)
         setup["Populacje (active_populations)"] = ", ".join(map(str, active_pops))
 
@@ -149,14 +185,31 @@ class TrainingPredictionReport:
         elements.append(ReportText(f"<b>Podsumowanie treningu i predykcji</b>", getSampleStyleSheet()['Title'], spacer=12))
         elements.append(ReportText(f"Model: <b>{self.experiment_setup.get('Model', '-')}</b>"))
         elements.append(ReportText(f"Typ modelu: <b>{self.experiment_setup.get('Typ modelu', '-')}</b>"))
-        loss_name = self.log_dir.name.split("_")[1] if "_" in self.log_dir.name else self.experiment_setup.get("loss_type", "-")
-        elements.append(ReportText(f"Funkcja straty: <b>{loss_name}</b>"))
-        acc_str = str(self.best_metrics["Val Accuracy"]) if self.best_metrics else "-"
+
+        loss_to_display = self.experiment_setup.get("Użyta funkcja straty", "-")
+        elements.append(ReportText(f"Funkcja straty: <b>{loss_to_display}</b>"))
+
+        acc_str = str(self.best_metrics["Val Accuracy"]) if self.best_metrics else "-" # To jest Val Accuracy, nie Composite Score
         elements.append(ReportText(f"Najlepszy accuracy (val): <b>{acc_str}</b>"))
 
+        # Można też dodać wyświetlanie Composite Score, jeśli jest dostępne w metrykach
+        if self.metrics is not None and 'Val Composite Score' in self.metrics.columns:
+            # Znajdź najlepszy composite score (ignorując NaN)
+            best_composite_score = self.metrics['Val Composite Score'].dropna().max()
+            if not pd.isna(best_composite_score):
+                 elements.append(ReportText(f"Najlepszy Composite Score (val): <b>{best_composite_score:.3f}</b>"))
+
+
         elements.append(ReportText("<i>Parametry treningu:</i>", style=getSampleStyleSheet()['Italic']))
+        # Klucze do wykluczenia z ogólnego listowania parametrów treningu
+        # (bo są już wyświetlone lub mają specjalne formatowanie)
+        excluded_keys_from_training_params = [
+            "Model", "Typ modelu", "Użyta funkcja straty", "Augmentacja",
+            "Wagi Composite Score (alpha)", "Wagi Composite Score (beta)", "Wagi Composite Score (gamma)",
+            "Funkcja straty (z params.yaml)" # Jeśli ten klucz istnieje, jest już pokryty przez "Użyta funkcja straty"
+        ]
         for k, v in self.experiment_setup.items():
-            if k not in ["Model", "Typ modelu", "loss_type", "Augmentacja"]:
+            if k not in excluded_keys_from_training_params:
                 elements.append(ReportText(f"{k}: {v}"))
 
         # --- Tabela metryk treningowych ---
