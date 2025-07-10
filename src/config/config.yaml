@@ -76,7 +76,7 @@ training:
     #- standard_ce
     #- sample_weighted_ce
     #- weighted_age_ce
-    - focal_loss_ageboost
+    # - focal_loss_ageboost
     - ldam
   stop_after_one_epoch: true
   epochs: 150
