@@ -1,0 +1,101 @@
+data:
+  metadata_file: "tests/data/metadata_test.xlsx" # Zmieniono
+  root_dir: "tests/data/sample_images/" # Zmieniono
+  train: "train"
+  val: "val"
+  test: "test" # Zakładamy, że katalogi test/1, test/2 istnieją w sample_images
+  batch_size: 2 # Zmieniono
+  active_populations: [1, 2] # Upewnij się, że odpowiada danym testowym
+
+base_model: # Ta sekcja może być mniej istotna, jeśli testujemy głównie multitask
+  base_model: "resnet50"
+  image_size: 224
+  pretrained: false # Zmieniono - dla szybkości testów i braku zależności od internetu
+  freeze_encoder: false
+  dropout_rate: 0.5
+  weight_decay: 0.01
+
+expert_model: # Zakładamy, że nie testujemy tego w podstawowym pipeline
+  use: false
+  base_model: "efficientnet_v2_l"
+  image_size: 480
+  pretrained: false # Zmieniono
+  freeze_encoder: false
+  dropout_rate: 0.3
+  weight_decay: 0.01
+
+multitask_model:
+  use: true                         # Testujemy głównie ten tryb
+  backbone_model:
+    model_name: "resnet50"          # Można wybrać mniejszy model dla szybkości, np. resnet18, jeśli jest zaimplementowany
+    image_size: 224                 # Zmniejsz, jeśli dane testowe są mniejsze, np. 64x64 lub 32x32
+    pretrained: false               # Zmieniono - dla szybkości testów
+    freeze_encoder: false
+    dropout_rate: 0.5
+    weight_decay: 0.01
+  classifier_head:
+    type: "linear"
+    dropout_rate: 0.5
+  regression_head:
+    type: "mlp"
+    hidden_dim: 32 # Zmniejszono dla szybkości
+    dropout_rate: 0.3
+  loss_weighting:
+    method: "static" # Prostsza metoda do testów
+    static:
+      classification: 1.0
+      age: 0.5 # Ustawione wagi statyczne
+  log_loss_components: true
+  metrics_weights:
+    alpha: 0.4
+    beta: 0.3
+    gamma: 0.3
+
+augmentation: # Można wyłączyć lub zminimalizować dla testów, aby przyspieszyć
+  rotation: 0
+  crop_scale: [1.0, 1.0] # Brak cropu
+  hflip_prob: 0.0
+  vflip_prob: 0.0
+  brightness: 0.0
+  contrast: 0.0
+  saturation: 0.0
+  hue: 0.0
+  affine_degrees: 0
+  affine_translate: [0.0, 0.0]
+  affine_scale: [1.0, 1.0]
+  affine_shear: 0
+  gaussian_blur_kernel: 1 # Minimalny blur lub wyłączyć (kernel_size musi być nieparzysty i >0)
+
+training:
+  loss_type:
+    - "focal_loss_ageboost" # Testujemy z jedną funkcją straty dla szybkości
+  stop_after_one_epoch: true # Kluczowe dla szybkich testów
+  epochs: 1 # Zmieniono
+  learning_rate: 0.001 # Może być większe dla testu, aby coś się działo
+  device: "cpu" # Wymuszenie CPU dla testów CI lub lokalnych bez GPU
+  early_stopping_patience: 3 # Mniejsza cierpliwość
+  checkpoint_dir: "test_artifacts/checkpoints" # Zmieniono - wyniki testów w osobnym miejscu
+
+# Sekcje prediction, prediction_modes, visualization mogą być mniej istotne dla testu pipeline treningowego,
+# ale zostawiam je na razie, aby struktura pliku była pełna.
+# W testach raportowania mogą być potrzebne.
+
+prediction:
+  model_path: "test_artifacts/checkpoints/some_test_model.pth" # Placeholder
+  image_path: "tests/data/sample_images/test/1/some_image.jpg" # Placeholder
+  results_dir: "test_artifacts/results/gradcam" # Zmieniono
+  show_visualization: false # Wyłączone dla testów automatycznych
+  save_results: false       # Wyłączone dla testów automatycznych
+
+prediction_modes:
+  navigation:
+    image_dir: "tests/data/sample_images/test" # Placeholder
+
+visualization:
+  methods: ['gradcam'] # Mniej metod dla szybkości
+  display_mode: 'matrix'
+  matrix_cols: 1
+  save_individual: false
+  target_layer: "base.layer4.2.conv3" # Dla resnet50
+  colormap: "jet"
+  alpha: 0.5

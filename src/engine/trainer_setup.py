@@ -2,8 +2,9 @@ import time
 from datetime import datetime
 import torch
 import torch.optim as optim
+import numpy as np # <-- DODANO IMPORT NUMPY
 from torch.utils.tensorboard import SummaryWriter
-from omegaconf import OmegaConf # <-- Dodano import
+from omegaconf import OmegaConf
 from models.model import HerringModel
 from models.multitask_model import MultiTaskHerringModel
 from engine.loss_utills import LossFactory, MultiTaskLossWrapper
