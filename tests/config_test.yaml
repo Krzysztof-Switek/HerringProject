@@ -1,35 +1,35 @@
 data:
-  metadata_file: "tests/data/metadata_test.xlsx" # Zmieniono
-  root_dir: "tests/data/sample_images/" # Zmieniono
+  metadata_file: "tests/data/metadata_test.xlsx"
+  root_dir: "tests/data/sample_images/"
   train: "train"
   val: "val"
-  test: "test" # Zakładamy, że katalogi test/1, test/2 istnieją w sample_images
-  batch_size: 2 # Zmieniono
-  active_populations: [1, 2] # Upewnij się, że odpowiada danym testowym
+  test: "test"
+  batch_size: 2
+  active_populations: [1, 2]
 
-base_model: # Ta sekcja może być mniej istotna, jeśli testujemy głównie multitask
+base_model:
   base_model: "resnet50"
   image_size: 224
-  pretrained: false # Zmieniono - dla szybkości testów i braku zależności od internetu
+  pretrained: false
   freeze_encoder: false
   dropout_rate: 0.5
   weight_decay: 0.01
 
-expert_model: # Zakładamy, że nie testujemy tego w podstawowym pipeline
+expert_model:
   use: false
   base_model: "efficientnet_v2_l"
   image_size: 480
-  pretrained: false # Zmieniono
+  pretrained: false
   freeze_encoder: false
   dropout_rate: 0.3
   weight_decay: 0.01
 
 multitask_model:
-  use: true                         # Testujemy głównie ten tryb
+  use: true
   backbone_model:
-    model_name: "resnet50"          # Można wybrać mniejszy model dla szybkości, np. resnet18, jeśli jest zaimplementowany
-    image_size: 224                 # Zmniejsz, jeśli dane testowe są mniejsze, np. 64x64 lub 32x32
-    pretrained: false               # Zmieniono - dla szybkości testów
+    model_name: "resnet50"
+    image_size: 224
+    pretrained: false
     freeze_encoder: false
     dropout_rate: 0.5
     weight_decay: 0.01
@@ -38,22 +38,22 @@ multitask_model:
     dropout_rate: 0.5
   regression_head:
     type: "mlp"
-    hidden_dim: 32 # Zmniejszono dla szybkości
+    hidden_dim: 32
     dropout_rate: 0.3
   loss_weighting:
-    method: "static" # Prostsza metoda do testów
+    method: "static"
     static:
       classification: 1.0
-      age: 0.5 # Ustawione wagi statyczne
+      age: 0.5
   log_loss_components: true
   metrics_weights:
     alpha: 0.4
     beta: 0.3
     gamma: 0.3
 
-augmentation: # Można wyłączyć lub zminimalizować dla testów, aby przyspieszyć
+augmentation:
   rotation: 0
-  crop_scale: [1.0, 1.0] # Brak cropu
+  crop_scale: [1.0, 1.0]
   hflip_prob: 0.0
   vflip_prob: 0.0
   brightness: 0.0
@@ -64,35 +64,31 @@ augmentation: # Można wyłączyć lub zminimalizować dla testów, aby przyspie
   affine_translate: [0.0, 0.0]
   affine_scale: [1.0, 1.0]
   affine_shear: 0
-  gaussian_blur_kernel: 1 # Minimalny blur lub wyłączyć (kernel_size musi być nieparzysty i >0)
+  gaussian_blur_kernel: 1
 
 training:
   loss_type:
-    - "focal_loss_ageboost" # Testujemy z jedną funkcją straty dla szybkości
-  stop_after_one_epoch: true # Kluczowe dla szybkich testów
-  epochs: 1 # Zmieniono
-  learning_rate: 0.001 # Może być większe dla testu, aby coś się działo
-  device: "cpu" # Wymuszenie CPU dla testów CI lub lokalnych bez GPU
-  early_stopping_patience: 3 # Mniejsza cierpliwość
-  checkpoint_dir: "test_artifacts/checkpoints" # Zmieniono - wyniki testów w osobnym miejscu
-
-# Sekcje prediction, prediction_modes, visualization mogą być mniej istotne dla testu pipeline treningowego,
-# ale zostawiam je na razie, aby struktura pliku była pełna.
-# W testach raportowania mogą być potrzebne.
+    - "focal_loss_ageboost"
+  stop_after_one_epoch: true
+  epochs: 1
+  learning_rate: 0.001
+  device: "cpu"
+  early_stopping_patience: 3
+  checkpoint_dir: "test_artifacts/checkpoints" # Relatywne do project_root, ale testy będą to kierować do unique dir
 
 prediction:
-  model_path: "test_artifacts/checkpoints/some_test_model.pth" # Placeholder
-  image_path: "tests/data/sample_images/test/1/some_image.jpg" # Placeholder
-  results_dir: "test_artifacts/results/gradcam" # Zmieniono
-  show_visualization: false # Wyłączone dla testów automatycznych
-  save_results: false       # Wyłączone dla testów automatycznych
+  model_path: "test_artifacts/checkpoints/some_test_model.pth"
+  image_path: "tests/data/sample_images/test/1/some_image.jpg" # Upewnij się, że taki obraz istnieje w danych testowych
+  results_dir: "test_artifacts/results/gradcam"
+  show_visualization: false
+  save_results: false
 
 prediction_modes:
   navigation:
-    image_dir: "tests/data/sample_images/test" # Placeholder
+    image_dir: "tests/data/sample_images/test"
 
 visualization:
-  methods: ['gradcam'] # Mniej metod dla szybkości
+  methods: ['gradcam']
   display_mode: 'matrix'
   matrix_cols: 1
   save_individual: false
