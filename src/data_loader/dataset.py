@@ -42,9 +42,10 @@ class HerringValDataset(Dataset):
         return img_tensor, label, meta
 
 class HerringDataset:
-    def __init__(self, config: DictConfig, population_mapper=None):
+    # Zmieniono: przyjmuje path_manager jako argument
+    def __init__(self, config: DictConfig, path_manager: PathManager, population_mapper=None):
         self.cfg = config
-        self.path_manager = PathManager(Path(__file__).parent.parent.parent, config)
+        self.path_manager = path_manager # Użyj przekazanego PathManager
         self.train_transform_base = self._get_base_transforms()
         self.train_transform_strong = self._get_strong_transforms()
         self.val_transform = self._get_val_transforms()

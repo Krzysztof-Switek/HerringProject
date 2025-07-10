@@ -41,12 +41,13 @@ class Trainer:
             print("   Konfiguracja zmodyfikowana.")
 
         self.population_mapper = PopulationMapper(self.cfg.data.active_populations)
-        self.path_manager = PathManager(self.project_root, self.cfg)
+        self.path_manager = PathManager(self.project_root, self.cfg) # PathManager jest tworzony tutaj
         self.device = self._init_device()
         print(f"Using device: {self.device}")
         self._validate_data_structure()
         self.model = None
-        self.data_loader = HerringDataset(self.cfg, population_mapper=self.population_mapper)
+        # Przekaż self.path_manager do HerringDataset
+        self.data_loader = HerringDataset(self.cfg, path_manager=self.path_manager, population_mapper=self.population_mapper)
         self.last_model_path = None
 
     def _load_config(self, config_path_override: str = None):
