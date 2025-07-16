@@ -127,10 +127,12 @@ def plot_loss_components(metrics_df, save_path):
 
 def generate_all_plots(metrics_df, cm_data, class_names, log_dir):
     """Generuje wszystkie wykresy dla raportu i zwraca listę ścieżek do plików."""
+    print("[DEBUG] Uruchomiono generate_all_plots.")
     images = []
     log_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Macierz pomyłek (jeśli dane są dostępne)
+    print(f"[DEBUG] Sprawdzam macierz pomyłek: Dane dostępne? {cm_data is not None}")
     if cm_data is not None:
         tmp_cm = log_dir / "__temp_cm.png"
         plot_confusion_matrix(cm_data, class_names, tmp_cm)
@@ -148,12 +150,14 @@ def generate_all_plots(metrics_df, cm_data, class_names, log_dir):
         images.append(tmp_loss)
 
         # Nowe wykresy
+        print(f"[DEBUG] Sprawdzam warunek dla 'Val Composite Score': {'Val Composite Score' in metrics_df.columns}")
         if 'Val Composite Score' in metrics_df.columns:
             tmp_comp_score = log_dir / "__temp_composite_score.png"
             plot_single_metric(metrics_df, tmp_comp_score, 'Val Composite Score', 'Composite Score (Walidacja)',
                                'Score')
             images.append(tmp_comp_score)
 
+        print(f"[DEBUG] Sprawdzam warunek dla 'Val MAE Age': {'Val MAE Age' in metrics_df.columns}")
         if 'Val MAE Age' in metrics_df.columns:
             tmp_mae = log_dir / "__temp_mae_age.png"
             plot_single_metric(metrics_df, tmp_mae, 'Val MAE Age', 'MAE Age (Walidacja)', 'MAE')
@@ -161,11 +165,14 @@ def generate_all_plots(metrics_df, cm_data, class_names, log_dir):
 
         loss_comp_cols = ["Train Classification Loss", "Val Classification Loss", "Train Regression Loss",
                           "Val Regression Loss"]
+        print(
+            f"[DEBUG] Sprawdzam warunek dla strat składowych: {all(col in metrics_df.columns for col in loss_comp_cols)}")
         if all(col in metrics_df.columns for col in loss_comp_cols):
             tmp_loss_comp = log_dir / "__temp_loss_components.png"
             plot_loss_components(metrics_df, tmp_loss_comp)
             images.append(tmp_loss_comp)
 
+    print(f"[DEBUG] generate_all_plots zwraca {len(images)} obrazów.")
     return images
 
 

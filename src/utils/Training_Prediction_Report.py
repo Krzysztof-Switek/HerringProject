@@ -38,6 +38,9 @@ class TrainingPredictionReport:
             metrics_files = list(self.log_dir.glob("*training_metrics.csv"))
             self.metrics = pd.read_csv(metrics_files[0]) if metrics_files else None
 
+        if self.metrics is not None:
+            print(f"[DEBUG] Wczytane kolumny metryk: {self.metrics.columns.tolist()}")
+
         self.predictions = pd.read_excel(self.predictions_path)
         self.metadata = pd.read_excel(self.metadata_path)
 
@@ -321,10 +324,12 @@ class TrainingPredictionReport:
             class_names=[str(p) for p in self.base_config.data.active_populations],
             log_dir=self.log_dir
         )
+        print(f"[DEBUG] Lista plików z wykresami do dodania: {plot_files}")
 
         # Dodajemy wykresy parami w wierszu (np. dwa na wiersz)
         for i in range(0, len(plot_files), 2):
             pair = plot_files[i:i + 2]
+            print(f"[DEBUG] Dodaję do raportu parę wykresów: {pair}")
             elements.append(ReportImageRow(pair, height=REPORT_IMAGE_HEIGHT))
 
         if "Augmentacja" in self.experiment_setup and self.experiment_setup[
