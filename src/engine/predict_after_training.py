@@ -6,10 +6,13 @@ from torchvision import transforms
 from models.model import HerringModel
 from models.multitask_model import MultiTaskHerringModel
 from utils.population_mapper import PopulationMapper  # 🟢 DODANO
-from omegaconf import OmegaConf # <-- Dodano import
-from pathlib import Path # <-- Dodano import
+from omegaconf import OmegaConf  # <-- Dodano import
+from pathlib import Path  # <-- Dodano import
+from typing import Optional  # <-- Dodano import dla Optional
 
-def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, log_dir, full_name):
+
+def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager,
+                                log_dir, full_name: str, limit_predictions: Optional[int] = None):
     import pandas as pd
     from PIL import Image
     import torch
@@ -50,17 +53,17 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, l
     # Użyj cfg (załadowanego z params.yaml lub fallback) do określenia image_size
     image_size_to_use = cfg.multitask_model.backbone_model.image_size if is_multitask else cfg.base_model.image_size
     transform = transforms.Compose([
-        transforms.Resize(image_size_to_use), # Użyj poprawnego image_size
+        transforms.Resize(image_size_to_use),  # Użyj poprawnego image_size
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
 
-    excel_path = path_manager.metadata_file() # Użyj oryginalnego path_manager
+    excel_path = path_manager.metadata_file()  # Użyj oryginalnego path_manager
     df = pd.read_excel(excel_path)
-    if "FilePath" not in df.columns: # Pozostaje bez zmian
+    if "FilePath" not in df.columns:  # Pozostaje bez zmian
         raise ValueError("Brakuje kolumny 'FilePath' zawierającej ścieżki do obrazów")
 
-    data_root = path_manager.data_root() # Użyj oryginalnego path_manager
+    data_root = path_manager.data_root()  # Użyj oryginalnego path_manager
     folders = [f"train/{pop}" for pop in population_mapper.active_populations] + \
               [f"val/{pop}" for pop in population_mapper.active_populations] + \
               [f"test/{pop}" for pop in population_mapper.active_populations]
@@ -70,13 +73,37 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, l
         if folder_path.exists():
             all_image_paths.extend(folder_path.glob("*.jpg"))
 
+    # Sort to ensure reproducibility if subset is taken, though not strictly necessary for random sample
+    all_image_paths.sort()
+
+    if limit_predictions is not None and limit_predictions > 0:
+        if len(all_image_paths) > limit_predictions:
+            # Można dodać losowe próbkowanie, jeśli to pożądane:
+            # import random
+            # all_image_paths = random.sample(all_image_paths, limit_predictions)
+            all_image_paths = all_image_paths[:limit_predictions]
+            print(f"⚠️ Predykcje zostaną ograniczone do {limit_predictions} obrazów (tryb debug/testowy).")
+        else:
+            print(
+                f"INFO: Żądano ograniczenia do {limit_predictions} obrazów, ale dostępnych jest tylko {len(all_image_paths)}. Użyte zostaną wszystkie dostępne.")
+
     predictions = {}
     total = len(all_image_paths)
+    if total == 0:
+        print(f"⚠️ Nie znaleziono obrazów do predykcji dla {loss_name}. Sprawdź ścieżki i konfigurację.")
+        # Zapis pustego wyniku lub obsługa błędu
+        df_empty = pd.DataFrame(columns=['FileName', f"{loss_name}_pred", f"{loss_name}_prob"] + (
+            [f"{loss_name}_age_pred"] if is_multitask else []))
+        output_path = log_dir / f"{full_name}_predictions.xlsx"
+        df_empty.to_excel(output_path, index=False)
+        print(f"✅ Zapisano pusty plik predykcji ({loss_name}) do: {output_path}")
+        return
+
     print(f"\n🔍 Start predykcji ({loss_name}) na {total} obrazach...")
 
     for i, image_path in enumerate(all_image_paths, 1):
         try:
-            if i % 100 == 0 or i == total:
+            if total <= 200 or i % 100 == 0 or i == total:  # Częstsze logowanie dla małej liczby obrazów
                 print(f"Przetworzono {i} z {total} obrazów...")
             image = Image.open(image_path).convert("RGB")
             input_tensor = transform(image).unsqueeze(0).to(device)

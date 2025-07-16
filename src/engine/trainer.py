@@ -9,38 +9,27 @@ from utils.population_mapper import PopulationMapper
 from omegaconf import DictConfig
 
 class Trainer:
-    def __init__(self, project_root: Path = None, config_path_override: str = None, config_override: DictConfig = None, debug_mode: bool = False):
+    def __init__(self, project_root: Path = None, config_path_override: str = None, config_override: DictConfig = None):
         self.project_root = project_root or Path(__file__).resolve().parent.parent.parent
         print(f"\nProject root: {self.project_root}")
-        self.debug_mode = debug_mode
         self.log_dir = None # Atrybut do przechowywania ścieżki logów dla Optuny
 
-        # NOWA LOGIKA: Priorytet dla obiektu config_override
+        # Priorytet dla obiektu config_override
         if config_override:
             self.cfg = config_override
             print("INFO: Konfiguracja załadowana z przekazanego obiektu OmegaConf.")
         else:
             self.cfg = self._load_config(config_path_override)
 
+        # NOWA LOGIKA: Ustaw debug_mode na podstawie wczytanej konfiguracji
+        self.debug_mode = self.cfg.get('training', {}).get('stop_after_one_epoch', False)
+
         if self.debug_mode:
-            print("🔥 Uruchomiono w trybie DEBUG 🔥")
-            print("   Modyfikowanie konfiguracji dla trybu DEBUG:")
-            # Ustawienie flagi stop_after_one_epoch, jeśli istnieje w konfiguracji
-            if 'training' in self.cfg and hasattr(self.cfg.training, 'stop_after_one_epoch'):
-                print(f"   - training.stop_after_one_epoch: {self.cfg.training.stop_after_one_epoch} -> True")
-                self.cfg.training.stop_after_one_epoch = True
-            else: # Jeśli nie ma, dodajmy ją
-                if 'training' not in self.cfg:
-                    OmegaConf.update(self.cfg, "training", {}, merge=True)
-                print(f"   - training.stop_after_one_epoch: (brak) -> True (dodano)")
-                OmegaConf.update(self.cfg.training, "stop_after_one_epoch", True, merge=True)
-
-            # Zmniejszenie liczby epok, jeśli stop_after_one_epoch nie jest używane lub dla pewności
-            if 'training' in self.cfg and hasattr(self.cfg.training, 'epochs'):
-                 print(f"   - training.epochs: {self.cfg.training.epochs} -> 1 (lub min(aktualna, 1))")
+            print("🔥 Uruchomiono w trybie DEBUG (na podstawie 'stop_after_one_epoch: true' w konfiguracji) 🔥")
+            # Upewnij się, że liczba epok jest 1, jeśli debug_mode jest aktywny
+            if self.cfg.training.get('epochs', 1) > 1:
+                 print(f"   - Wymuszanie liczby epok na 1 w trybie debug.")
                  self.cfg.training.epochs = 1
-
-            print("   Konfiguracja zmodyfikowana.")
 
         self.population_mapper = PopulationMapper(self.cfg.data.active_populations)
         self.path_manager = PathManager(self.project_root, self.cfg)
