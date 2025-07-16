@@ -10,7 +10,7 @@ from omegaconf import DictConfig
 
 class Trainer:
     def __init__(self, project_root: Path = None, config_path_override: str = None, config_override: DictConfig = None, debug_mode: bool = False):
-        self.project_root = project_root or Path(__file__).resolve().parent.parent
+        self.project_root = project_root or Path(__file__).resolve().parent.parent.parent
         print(f"\nProject root: {self.project_root}")
         self.debug_mode = debug_mode
         self.log_dir = None # Atrybut do przechowywania ścieżki logów dla Optuny
