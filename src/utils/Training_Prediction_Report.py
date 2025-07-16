@@ -311,22 +311,6 @@ class TrainingPredictionReport:
             ]
             elements.append(ReportTable(train_metrics_data))
 
-        # --- Macierz pomyłek ---
-        if self.confusion_matrix is not None:
-            elements.append(ReportText("<b>Macierz pomyłek (dla najlepszej epoki)</b>", getSampleStyleSheet()['h2']))
-            cm_plot_path = self.log_dir / "temp_confusion_matrix.png"
-            try:
-                # Założenie, że ta funkcja istnieje w plots.py i zostanie dodana w następnym kroku
-                from .plots import plot_confusion_matrix
-                # Użyj aktywnych populacji jako nazw klas
-                class_names = [str(p) for p in self.base_config.data.active_populations]
-                plot_confusion_matrix(self.confusion_matrix, class_names, output_path=cm_plot_path)
-                elements.append(ReportImageRow([cm_plot_path], height=REPORT_IMAGE_HEIGHT * 1.5))
-            except ImportError:
-                elements.append(ReportText("<i>Funkcja plot_confusion_matrix nie znaleziona.</i>"))
-            except Exception as e:
-                elements.append(ReportText(f"<i>Błąd generowania macierzy pomyłek: {e}</i>"))
-
         # --- Macierz pomyłek i wykresy metryk ---
         elements.append(ReportText("<b>Wizualizacje treningu</b>", getSampleStyleSheet()['h2']))
 
