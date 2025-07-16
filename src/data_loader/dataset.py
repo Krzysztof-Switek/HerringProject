@@ -7,8 +7,61 @@ from collections import Counter, defaultdict
 from omegaconf import DictConfig
 from pathlib import Path
 from utils.path_manager import PathManager
-from utils.population_mapper import PopulationMapper    # DODANO
+from utils.population_mapper import PopulationMapper  # DODANO
 from PIL import Image
+
+
+class HerringTrainDataset(Dataset):
+    def __init__(self, image_folder, metadata, base_transform, strong_transform, population_mapper, class_counts,
+                 augment_applied_dict, augment_threshold):
+        self.image_folder = image_folder
+        self.metadata = metadata
+        self.base_transform = base_transform
+        self.strong_transform = strong_transform
+        self.population_mapper = population_mapper
+        self.class_counts = class_counts
+        self.augment_applied = augment_applied_dict
+        self.augment_threshold = augment_threshold
+        self.max_count = max(self.class_counts.values()) if self.class_counts else 0
+
+        self.valid_indices = [
+            idx for idx, (path, _) in enumerate(self.image_folder.imgs)
+            if self._is_valid(path)
+        ]
+
+    def _is_valid(self, path):
+        fname = os.path.basename(path).strip().lower()
+        meta = self.metadata.get(fname, (-9, -9))
+        pop = meta[0]
+        return pop in self.population_mapper.active_populations
+
+    def __len__(self):
+        return len(self.valid_indices)
+
+    def __getitem__(self, idx):
+        real_idx = self.valid_indices[idx]
+        path, _ = self.image_folder.imgs[real_idx]
+        image = Image.open(path).convert("RGB")
+
+        filename = os.path.basename(path).strip().lower()
+        pop, wiek = self.metadata.get(filename, (-9, -9))
+        label = self.population_mapper.to_idx(pop)
+        meta = {'populacja': pop, 'wiek': wiek}
+
+        # Logika decydująca o augmentacji
+        current_class_count = self.class_counts.get((pop, wiek), 0)
+
+        # Stosuj augmentację, jeśli liczba próbek w klasie jest poniżej progu
+        # np. próg 0.7 oznacza, że augmentujemy klasy mające mniej niż 70% próbek najliczniejszej klasy
+        if self.max_count > 0 and (current_class_count / self.max_count) < self.augment_threshold:
+            img_tensor = self.strong_transform(image)
+            # Zliczanie zastosowanej augmentacji
+            self.augment_applied[(pop, wiek)] += 1
+        else:
+            img_tensor = self.base_transform(image)
+
+        return img_tensor, label, meta
+
 
 class HerringValDataset(Dataset):
     def __init__(self, image_folder, metadata, transform, population_mapper):
@@ -41,11 +94,12 @@ class HerringValDataset(Dataset):
         meta = {'populacja': pop, 'wiek': wiek}
         return img_tensor, label, meta
 
+
 class HerringDataset:
     # Zmieniono: przyjmuje path_manager jako argument
     def __init__(self, config: DictConfig, path_manager: PathManager, population_mapper=None):
         self.cfg = config
-        self.path_manager = path_manager # Użyj przekazanego PathManager
+        self.path_manager = path_manager  # Użyj przekazanego PathManager
         self.train_transform_base = self._get_base_transforms()
         self.train_transform_strong = self._get_strong_transforms()
         self.val_transform = self._get_val_transforms()
@@ -137,11 +191,23 @@ class HerringDataset:
         val_dir = data_root / 'val'
 
         train_base = datasets.ImageFolder(str(train_dir))
-        train_base.transform = self.train_transform_base
+        # Nie przypisujemy transformacji tutaj, bo będzie dynamicznie wybierana w HerringTrainDataset
         val_base = datasets.ImageFolder(str(val_dir))
 
         val_set = HerringValDataset(val_base, self.metadata, self.val_transform, self.population_mapper)
-        train_set = HerringValDataset(train_base, self.metadata, self.train_transform_base, self.population_mapper)
+
+        # Użyj nowej klasy dla zbioru treningowego
+        augment_threshold = self.cfg.data.get('augment_threshold', 0.7)  # Pobierz próg z configu, z domyślną wartością
+        train_set = HerringTrainDataset(
+            image_folder=train_base,
+            metadata=self.metadata,
+            base_transform=self.train_transform_base,
+            strong_transform=self.train_transform_strong,
+            population_mapper=self.population_mapper,
+            class_counts=self.class_counts,
+            augment_applied_dict=self.augment_applied,
+            augment_threshold=augment_threshold
+        )
 
         train_loader = DataLoader(
             train_set,

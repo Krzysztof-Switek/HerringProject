@@ -6,6 +6,7 @@ data:
   test: "test"
   batch_size: 32
   active_populations: [1, 2]
+  augment_threshold: 0.7 # Klasy z liczbą próbek < 70% najliczniejszej klasy będą augmentowane
 
 base_model:
   base_model: "resnet50"
@@ -73,11 +74,11 @@ training:
     #- ghm
     #- seesaw
     #- asymmetric_focal
-    #- standard_ce
+    - standard_ce
     #- sample_weighted_ce
     #- weighted_age_ce
     # - focal_loss_ageboost
-    - ldam
+    #- ldam
   stop_after_one_epoch: true
   epochs: 150
   learning_rate: 0.00001
