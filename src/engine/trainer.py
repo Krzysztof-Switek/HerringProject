@@ -1,10 +1,12 @@
 import torch
 from pathlib import Path
-from omegaconf import OmegaConf, DictConfig # Upewnij się, że DictConfig jest zaimportowany
+from omegaconf import OmegaConf
 from data_loader.dataset import HerringDataset
 from utils.path_manager import PathManager
 from engine.trainer_setup import run_training_loop
 from utils.population_mapper import PopulationMapper
+
+from omegaconf import DictConfig
 
 class Trainer:
     def __init__(self, project_root: Path = None, config_path_override: str = None, config_override: DictConfig = None, debug_mode: bool = False):
@@ -52,14 +54,16 @@ class Trainer:
     def _load_config(self, config_path_override: str = None):
         # Użyj config_path_override jeśli jest dostępny, w przeciwnym razie domyślna ścieżka
         if config_path_override is not None:
-            final_config_path = self.project_root / config_path_override
+            final_config_path = self.project_root / config_path_override # Zakładamy, że jest to ścieżka względna do roota lub absolutna
             if not final_config_path.is_file():
+                 # Spróbuj jako ścieżkę absolutną, jeśli nie jest to ścieżka względna do roota
                 final_config_path = Path(config_path_override)
                 if not final_config_path.is_file():
                     raise FileNotFoundError(f"Plik konfiguracyjny '{config_path_override}' nie został znaleziony (sprawdzono jako względny i absolutny).")
             print(f"Ładowanie konfiguracji z (override): {final_config_path}")
         else:
-            temp_path_manager = PathManager(self.project_root, cfg=None)
+            # Użyj domyślnej ścieżki z PathManager
+            temp_path_manager = PathManager(self.project_root, cfg=None) # cfg=None, bo jeszcze go nie mamy
             final_config_path = temp_path_manager.config_path()
             print(f"Ładowanie konfiguracji z (domyślna): {final_config_path}")
 
