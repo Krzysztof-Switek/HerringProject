@@ -70,22 +70,101 @@ def _plot_placeholder(save_path, message, width_inch, height_inch):
     plt.close()
 
 
-def generate_all_plots(metrics_df, log_dir):
+def plot_single_metric(metrics_df, save_path, column_name, title, y_label):
+    """Generyczna funkcja do rysowania pojedynczej metryki w czasie."""
+    fig_width_inch = USABLE_WIDTH / 2 / 25.4
+    fig_height_inch = MATPLOT_FIG_HEIGHT
+    dpi = MATPLOTLIB_DEFAULTS.get("figure.dpi", 150)
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+
+    if metrics_df is not None and not metrics_df.empty and column_name in metrics_df.columns:
+        epochs = list(range(1, len(metrics_df) + 1))
+        plt.figure(figsize=(fig_width_inch, fig_height_inch), dpi=dpi)
+        plt.plot(epochs, metrics_df[column_name], label=column_name, marker="o")
+        plt.ylabel(y_label)
+        plt.xlabel("Epoka")
+        plt.title(title)
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=dpi)
+        plt.close()
+    else:
+        _plot_placeholder(save_path, f"Brak danych dla\\n{column_name}", fig_width_inch, fig_height_inch)
+
+
+def plot_loss_components(metrics_df, save_path):
+    """Wykres strat składowych (train/val, classification/regression) na podstawie df z metrykami."""
+    fig_width_inch = USABLE_WIDTH / 2 / 25.4
+    fig_height_inch = MATPLOT_FIG_HEIGHT
+    dpi = MATPLOTLIB_DEFAULTS.get("figure.dpi", 150)
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+
+    required_cols = [
+        "Train Classification Loss", "Val Classification Loss",
+        "Train Regression Loss", "Val Regression Loss"
+    ]
+    if metrics_df is not None and not metrics_df.empty and all(col in metrics_df.columns for col in required_cols):
+        epochs = list(range(1, len(metrics_df) + 1))
+        plt.figure(figsize=(fig_width_inch, fig_height_inch), dpi=dpi)
+
+        plt.plot(epochs, metrics_df["Train Classification Loss"], label="Train Class. Loss", marker="o", linestyle='--')
+        plt.plot(epochs, metrics_df["Val Classification Loss"], label="Val Class. Loss", marker="o")
+        plt.plot(epochs, metrics_df["Train Regression Loss"], label="Train Reg. Loss", marker="x", linestyle='--')
+        plt.plot(epochs, metrics_df["Val Regression Loss"], label="Val Reg. Loss", marker="x")
+
+        plt.ylabel("Loss")
+        plt.xlabel("Epoka")
+        plt.title("Straty składowe (trening/walidacja)")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=dpi)
+        plt.close()
+    else:
+        _plot_placeholder(save_path, "Brak danych\\nstrat składowych", fig_width_inch, fig_height_inch)
+
+
+def generate_all_plots(metrics_df, cm_data, class_names, log_dir):
+    """Generuje wszystkie wykresy dla raportu i zwraca listę ścieżek do plików."""
     images = []
+    log_dir.mkdir(parents=True, exist_ok=True)
 
-    tmp_acc = Path(log_dir) / "__temp_acc.png"
-    tmp_loss = Path(log_dir) / "__temp_loss.png"
+    # 1. Macierz pomyłek (jeśli dane są dostępne)
+    if cm_data is not None:
+        tmp_cm = log_dir / "__temp_cm.png"
+        plot_confusion_matrix(cm_data, class_names, tmp_cm)
+        images.append(tmp_cm)
 
-    plot_training_accuracy(metrics_df, tmp_acc)
-    plot_training_loss(metrics_df, tmp_loss)
+    # 2. Wykresy metryk z DataFrame
+    if metrics_df is not None and not metrics_df.empty:
+        # Istniejące wykresy
+        tmp_acc = log_dir / "__temp_acc.png"
+        plot_training_accuracy(metrics_df, tmp_acc)
+        images.append(tmp_acc)
 
-    images.append(tmp_acc)
-    images.append(tmp_loss)
+        tmp_loss = log_dir / "__temp_loss.png"
+        plot_training_loss(metrics_df, tmp_loss)
+        images.append(tmp_loss)
 
-    # Dodawaj kolejne wykresy poniżej (np. F1, precision, multitask-specific etc.)
-    # tmp_f1 = Path(log_dir) / "__temp_f1.png"
-    # plot_training_f1(metrics_df, tmp_f1)
-    # images.append(tmp_f1)
+        # Nowe wykresy
+        if 'Val Composite Score' in metrics_df.columns:
+            tmp_comp_score = log_dir / "__temp_composite_score.png"
+            plot_single_metric(metrics_df, tmp_comp_score, 'Val Composite Score', 'Composite Score (Walidacja)',
+                               'Score')
+            images.append(tmp_comp_score)
+
+        if 'Val MAE Age' in metrics_df.columns:
+            tmp_mae = log_dir / "__temp_mae_age.png"
+            plot_single_metric(metrics_df, tmp_mae, 'Val MAE Age', 'MAE Age (Walidacja)', 'MAE')
+            images.append(tmp_mae)
+
+        loss_comp_cols = ["Train Classification Loss", "Val Classification Loss", "Train Regression Loss",
+                          "Val Regression Loss"]
+        if all(col in metrics_df.columns for col in loss_comp_cols):
+            tmp_loss_comp = log_dir / "__temp_loss_components.png"
+            plot_loss_components(metrics_df, tmp_loss_comp)
+            images.append(tmp_loss_comp)
 
     return images
 

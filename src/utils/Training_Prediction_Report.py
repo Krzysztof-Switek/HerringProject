@@ -185,6 +185,7 @@ class TrainingPredictionReport:
             # Zapisz wszystkie kluczowe metryki z tej najlepszej epoki
             self.best_metrics = {
                 "Epoch": best_row.get("Epoch", idx_best + 1),
+                # Metryki walidacyjne
                 "Val Composite Score": best_row.get("Val Composite Score"),
                 "Val F1": best_row.get("Val F1"),
                 "Val MAE Age": best_row.get("Val MAE Age"),
@@ -194,9 +195,15 @@ class TrainingPredictionReport:
                 "Val Recall": best_row.get("Val Recall"),
                 "Val AUC": best_row.get("Val AUC"),
                 "Val Loss": best_row.get("Val Loss"),
+                "Val Classification Loss": best_row.get("Val Classification Loss"),
+                "Val Regression Loss": best_row.get("Val Regression Loss"),
+                # Metryki treningowe z tej samej epoki
                 "Train Loss": best_row.get("Train Loss"),
                 "Train Accuracy": best_row.get("Train Accuracy"),
-                "Train F1": best_row.get("Train F1")
+                "Train F1": best_row.get("Train F1"),
+                "Train AUC": best_row.get("Train AUC"),
+                "Train Classification Loss": best_row.get("Train Classification Loss"),
+                "Train Regression Loss": best_row.get("Train Regression Loss"),
             }
             print(
                 f"Znaleziono najlepszą epokę ({self.best_metrics['Epoch']}) z Composite Score: {self.best_metrics['Val Composite Score']:.4f}")
@@ -275,19 +282,34 @@ class TrainingPredictionReport:
 
         # --- Tabela najlepszych metryk (wg Composite Score) ---
         if self.best_metrics:
-            elements.append(ReportText(f"<b>Najlepsze metryki (dla epoki {self.best_metrics['Epoch']})</b>",
-                                       getSampleStyleSheet()['h2']))
+            elements.append(ReportText(
+                f"<b>Szczegółowe metryki (dla najlepszej epoki: {self.best_metrics.get('Epoch', 'N/A')})</b>",
+                getSampleStyleSheet()['h2']))
 
-            # Tabela głównych metryk
-            best_metrics_data = [
-                ["Metryka", "Wartość"],
+            # Tabela metryk walidacyjnych
+            val_metrics_data = [
+                ["Metryka walidacyjna", "Wartość"],
                 ["Val Composite Score", f"{self.best_metrics.get('Val Composite Score', 0):.4f}"],
-                ["Val F1 Global", f"{self.best_metrics.get('Val F1', 0):.4f}"],
-                ["Val MAE Age", f"{self.best_metrics.get('Val MAE Age', 0):.4f}"],
-                ["Val F1 Subgroup", f"{self.best_metrics.get('Val F1 Pop2 Age3-6', 0):.4f}"],
+                ["- Val F1 Global (składowa)", f"{self.best_metrics.get('Val F1', 0):.4f}"],
+                ["- Val MAE Age (składowa)", f"{self.best_metrics.get('Val MAE Age', 0):.4f}"],
+                ["- Val F1 Subgroup (składowa)", f"{self.best_metrics.get('Val F1 Pop2 Age3-6', 0):.4f}"],
                 ["Val Accuracy", f"{self.best_metrics.get('Val Accuracy', 0):.2f}%"],
+                ["Val Loss (łączna)", f"{self.best_metrics.get('Val Loss', 0):.4f}"],
+                ["- Val Classification Loss", f"{self.best_metrics.get('Val Classification Loss', 0):.4f}"],
+                ["- Val Regression Loss", f"{self.best_metrics.get('Val Regression Loss', 0):.4f}"],
             ]
-            elements.append(ReportTable(best_metrics_data))
+            elements.append(ReportTable(val_metrics_data))
+
+            # Tabela metryk treningowych (z tej samej epoki)
+            train_metrics_data = [
+                ["Metryka treningowa", "Wartość"],
+                ["Train Accuracy", f"{self.best_metrics.get('Train Accuracy', 0):.2f}%"],
+                ["Train F1", f"{self.best_metrics.get('Train F1', 0):.4f}"],
+                ["Train Loss (łączna)", f"{self.best_metrics.get('Train Loss', 0):.4f}"],
+                ["- Train Classification Loss", f"{self.best_metrics.get('Train Classification Loss', 0):.4f}"],
+                ["- Train Regression Loss", f"{self.best_metrics.get('Train Regression Loss', 0):.4f}"],
+            ]
+            elements.append(ReportTable(train_metrics_data))
 
         # --- Macierz pomyłek ---
         if self.confusion_matrix is not None:
@@ -305,10 +327,16 @@ class TrainingPredictionReport:
             except Exception as e:
                 elements.append(ReportText(f"<i>Błąd generowania macierzy pomyłek: {e}</i>"))
 
-        # --- wykresy --- (AUTOMATYZACJA)
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        plot_files = generate_all_plots(self.metrics, self.log_dir)
-        elements.append(ReportText("<b>Wykresy metryk po epokach</b>", getSampleStyleSheet()['Title']))
+        # --- Macierz pomyłek i wykresy metryk ---
+        elements.append(ReportText("<b>Wizualizacje treningu</b>", getSampleStyleSheet()['h2']))
+
+        # Przekazujemy wszystkie potrzebne dane do jednej funkcji, która zarządza tworzeniem wszystkich obrazów
+        plot_files = generate_all_plots(
+            metrics_df=self.metrics,
+            cm_data=self.confusion_matrix,
+            class_names=[str(p) for p in self.base_config.data.active_populations],
+            log_dir=self.log_dir
+        )
 
         # Dodajemy wykresy parami w wierszu (np. dwa na wiersz)
         for i in range(0, len(plot_files), 2):

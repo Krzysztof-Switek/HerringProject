@@ -137,8 +137,9 @@ def save_best_model(trainer, current_composite_score, val_cm, model_name, loss_n
         torch.save(trainer.model.state_dict(), model_path)
         trainer.last_model_path = model_path  # Ścieżka do ostatnio zapisanego *najlepszego* modelu
 
-        # Zapisz macierz pomyłek dla najlepszego modelu
-        cm_path = checkpoint_dir / "best_confusion_matrix.csv"
+        # Zapisz macierz pomyłek dla najlepszego modelu bezpośrednio w log_dir
+        # To upraszcza późniejsze znalezienie go przez TrainingPredictionReport
+        cm_path = trainer.log_dir / "best_confusion_matrix.csv"
         np.savetxt(cm_path, val_cm, delimiter=",", fmt="%d")
 
         print(f"📂 Zapisano najlepszy model (Score: {current_composite_score:.3f}) do: {model_path}")
