@@ -1,17 +1,21 @@
 import csv
 import torch
-import numpy as np
+import numpy as np  # Dodano dla np.isnan
+from datetime import datetime
 from pathlib import Path
+
 
 def init_metrics_logger(trainer, log_dir, full_name):
     metrics_file_path = log_dir / f"{full_name}_training_metrics.csv"
     trainer.metrics_file = open(metrics_file_path, mode="w", newline="")
     trainer.metrics_writer = csv.writer(trainer.metrics_file)
 
-    class_labels = list(range(len(trainer.population_mapper.active_populations)))   # 🟢 ZMIANA
+    # 🟢 ZMIANA: Użyj population_mapper do opisania klas biologicznych
+    class_labels = list(range(len(trainer.population_mapper.active_populations)))  # 🟢 ZMIANA
     biologic_labels = [trainer.population_mapper.to_pop(idx) for idx in class_labels]  # 🟢 ZMIANA
     class_headers = [f"Train Class {bio} (idx {idx})" for bio, idx in zip(biologic_labels, class_labels)]  # 🟢 ZMIANA
 
+    # 🟣 ZMIANA multitask: Dodajemy dodatkowe kolumny do nagłówka
     multitask_headers = [
         'Train Classification Loss', 'Val Classification Loss',
         'Train Regression Loss', 'Val Regression Loss'
@@ -29,15 +33,20 @@ def init_metrics_logger(trainer, log_dir, full_name):
         'Train Time (s)'
     ])
 
+
 def log_epoch_metrics(trainer, epoch, loss_name, train_metrics, val_metrics, epoch_time):
-    class_labels = list(range(len(trainer.population_mapper.active_populations)))   # 🟢 ZMIANA
+    # 🟢 ZMIANA: indeksy klas zamiast numerów populacji
+    class_labels = list(range(len(trainer.population_mapper.active_populations)))  # 🟢 ZMIANA
     biologic_labels = [trainer.population_mapper.to_pop(idx) for idx in class_labels]  # 🟢 ZMIANA
 
     train_class_counts = get_class_distribution(train_metrics["targets"], class_labels)
+    val_class_counts = get_class_distribution(val_metrics["targets"], class_labels)
     val_samples = len(val_metrics["targets"])
     train_samples = len(train_metrics["targets"])
 
-    class_dist_str = ", ".join([f"{lbl}({bio}): {cnt}" for lbl, bio, cnt in zip(class_labels, biologic_labels, train_class_counts)])  # 🟢 ZMIANA
+    # 🟢 ZMIANA: Dodano print indeksy → biologiczne
+    class_dist_str = ", ".join([f"{lbl}({bio}): {cnt}" for lbl, bio, cnt in
+                                zip(class_labels, biologic_labels, train_class_counts)])  # 🟢 ZMIANA
     print(f"\nEpoch {epoch + 1}/{trainer.cfg.training.epochs} ({loss_name}):")
     print(f"Train - Loss: {train_metrics['loss']:.4f}, Acc: {train_metrics['acc']:.2f}%, "
           f"Precision: {train_metrics['precision']:.2f}, Recall: {train_metrics['recall']:.2f}, "
@@ -45,13 +54,16 @@ def log_epoch_metrics(trainer, epoch, loss_name, train_metrics, val_metrics, epo
     print(f"Val   - Loss: {val_metrics['loss']:.4f}, Acc: {val_metrics['acc']:.2f}%, "
           f"Precision: {val_metrics['precision']:.2f}, Recall: {val_metrics['recall']:.2f}, "
           f"F1: {val_metrics['f1']:.2f}, AUC: {val_metrics['auc']:.2f}")
-    print(f"Train class dist: {class_dist_str}, Time: {epoch_time:.1f}s")
+    print(f"Train class dist: {class_dist_str}, Time: {epoch_time:.1f}s")  # 🟢 ZMIANA
 
-    train_cls_loss = train_metrics.get("classification_loss", np.nan)
-    val_cls_loss = val_metrics.get("classification_loss", np.nan)
-    train_reg_loss = train_metrics.get("regression_loss", np.nan)
-    val_reg_loss = val_metrics.get("regression_loss", np.nan)
+    # 🟣 ZMIANA multitask: Pobierz dodatkowe metryki, domyślnie None lub np.nan
+    # train_epoch/validate now return these keys with float values or np.nan
+    train_cls_loss = train_metrics.get("classification_loss", np.nan)  # Default to np.nan
+    val_cls_loss = val_metrics.get("classification_loss", np.nan)  # Corrected: use val_metrics
+    train_reg_loss = train_metrics.get("regression_loss", np.nan)  # Default to np.nan
+    val_reg_loss = val_metrics.get("regression_loss", np.nan)  # Corrected: use val_metrics
 
+    # Using np.nan for missing values is good for CSV (writes "nan") and for TensorBoard checks.
 
     trainer.metrics_writer.writerow([
         f"{loss_name}-e{epoch + 1}", train_samples, val_samples, *train_class_counts,
@@ -73,12 +85,12 @@ def log_epoch_metrics(trainer, epoch, loss_name, train_metrics, val_metrics, epo
         # Metryki treningowe
         trainer.writer.add_scalar(f'Loss/train_{loss_name}', train_metrics["loss"], epoch)
         trainer.writer.add_scalar(f'Accuracy/train_{loss_name}', train_metrics["acc"], epoch)
-        trainer.writer.add_scalar(f'F1_score/train_{loss_name}', train_metrics["f1"], epoch) # Global F1 for train
+        trainer.writer.add_scalar(f'F1_score/train_{loss_name}', train_metrics["f1"], epoch)  # Global F1 for train
 
         # Metryki walidacyjne
         trainer.writer.add_scalar(f'Loss/val_{loss_name}', val_metrics["loss"], epoch)
         trainer.writer.add_scalar(f'Accuracy/val_{loss_name}', val_metrics["acc"], epoch)
-        trainer.writer.add_scalar(f'F1_score/val_GLOBAL_{loss_name}', val_metrics["f1"], epoch) # Global F1 for val
+        trainer.writer.add_scalar(f'F1_score/val_GLOBAL_{loss_name}', val_metrics["f1"], epoch)  # Global F1 for val
 
         # Nowe metryki walidacyjne dla TensorBoard
         if "mae_age" in val_metrics and not np.isnan(val_metrics["mae_age"]):
@@ -93,13 +105,14 @@ def log_epoch_metrics(trainer, epoch, loss_name, train_metrics, val_metrics, epo
         # Dodatkowo logowanie komponentów strat, jeśli są dostępne (zgodnie z istniejącą logiką)
         if trainer.cfg.multitask_model.log_loss_components:
             if not np.isnan(train_cls_loss):
-                 trainer.writer.add_scalar(f'Loss_Train/classification_{loss_name}', train_cls_loss, epoch)
+                trainer.writer.add_scalar(f'Loss_Train/classification_{loss_name}', train_cls_loss, epoch)
             if not np.isnan(train_reg_loss):
-                 trainer.writer.add_scalar(f'Loss_Train/regression_{loss_name}', train_reg_loss, epoch)
+                trainer.writer.add_scalar(f'Loss_Train/regression_{loss_name}', train_reg_loss, epoch)
             if not np.isnan(val_cls_loss):
-                 trainer.writer.add_scalar(f'Loss_Val/classification_{loss_name}', val_cls_loss, epoch)
+                trainer.writer.add_scalar(f'Loss_Val/classification_{loss_name}', val_cls_loss, epoch)
             if not np.isnan(val_reg_loss):
-                 trainer.writer.add_scalar(f'Loss_Val/regression_{loss_name}', val_reg_loss, epoch)
+                trainer.writer.add_scalar(f'Loss_Val/regression_{loss_name}', val_reg_loss, epoch)
+
 
 def save_best_model(trainer, current_composite_score, val_cm, model_name, loss_name, checkpoint_dir):
     """
@@ -109,12 +122,12 @@ def save_best_model(trainer, current_composite_score, val_cm, model_name, loss_n
     # Obsługa przypadku, gdy current_composite_score jest nan
     if np.isnan(current_composite_score):
         print(f"⚠️ Composite score is NaN. Nie można porównać i zapisać modelu.")
-        return trainer, False # Nie było poprawy, nie resetuj licznika early stopping
+        return trainer, False  # Nie było poprawy, nie resetuj licznika early stopping
 
     # Porównujemy z trainer.best_score (który został zainicjalizowany na -float('inf'))
     if current_composite_score > trainer.best_score:
         trainer.best_score = current_composite_score
-        trainer.best_cm = val_cm # Zapisujemy CM dla modelu z najlepszym score
+        trainer.best_cm = val_cm  # Zapisujemy CM dla modelu z najlepszym score
 
         # Zmieniamy nazwę pliku, aby odzwierciedlała composite_score
         # Używamy formatowania f-string z 3 miejscami po przecinku dla score
@@ -122,29 +135,43 @@ def save_best_model(trainer, current_composite_score, val_cm, model_name, loss_n
         model_path = checkpoint_dir / model_filename
 
         torch.save(trainer.model.state_dict(), model_path)
-        trainer.last_model_path = model_path # Ścieżka do ostatnio zapisanego *najlepszego* modelu
+        trainer.last_model_path = model_path  # Ścieżka do ostatnio zapisanego *najlepszego* modelu
+
+        # Zapisz macierz pomyłek dla najlepszego modelu
+        cm_path = checkpoint_dir / "best_confusion_matrix.csv"
+        np.savetxt(cm_path, val_cm, delimiter=",", fmt="%d")
+
         print(f"📂 Zapisano najlepszy model (Score: {current_composite_score:.3f}) do: {model_path}")
-        trainer.early_stop_counter = 0 # Reset licznika, bo nastąpiła poprawa
+        print(f"📊 Zapisano macierz pomyłek najlepszego modelu do: {cm_path}")
+
+        trainer.early_stop_counter = 0  # Reset licznika, bo nastąpiła poprawa
         return trainer, True
 
     # Jeśli nie było poprawy
     return trainer, False
+
 
 def should_stop_early(trainer):
     # Warunek early stopping pozostaje taki sam, ale bazuje na liczniku,
     # który jest resetowany tylko gdy `best_score` się poprawia.
     return trainer.early_stop_counter >= trainer.cfg.training.early_stopping_patience
 
+
 def get_class_distribution(targets, class_labels):
+    import numpy as np
+    # 🟢 Poprawka: rzutowanie wszystkiego na int (obsługa tensorów i innych typów)
     targets = [int(t.item()) if hasattr(t, 'item') else int(t) for t in targets]
     values, counts = np.unique(targets, return_counts=True)
     class_dist = {int(v): int(c) for v, c in zip(values, counts)}
+    # 🟢 Gwarantowana kolejność zgodna z class_labels (czyli z population_mapper)
     return tuple(class_dist.get(int(lbl), 0) for lbl in class_labels)
+
 
 def log_augmentation_summary(augment_applied_dict, full_name, log_dir: Path = None):
     if log_dir is None:
         log_dir = Path("results/logs")
     log_dir.mkdir(parents=True, exist_ok=True)
+    date_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
     filename = f"augmentation_summary_{full_name}.csv"
     output_path = log_dir / filename
 

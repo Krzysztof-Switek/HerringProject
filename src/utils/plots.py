@@ -71,7 +71,6 @@ def _plot_placeholder(save_path, message, width_inch, height_inch):
 
 
 def generate_all_plots(metrics_df, log_dir):
-
     images = []
 
     tmp_acc = Path(log_dir) / "__temp_acc.png"
@@ -89,3 +88,50 @@ def generate_all_plots(metrics_df, log_dir):
     # images.append(tmp_f1)
 
     return images
+
+
+def plot_confusion_matrix(cm_data, class_names, output_path, figsize=(8, 6)):
+    """
+    Generuje i zapisuje wykres macierzy pomyłek.
+    """
+    import seaborn as sns
+    import numpy as np
+
+    plt.figure(figsize=figsize)
+
+    # Sprawdzenie, czy suma wiersza nie jest zerem, aby uniknąć dzielenia przez zero
+    cm_sum = cm_data.sum(axis=1)[:, np.newaxis]
+    # Użyj np.divide z klauzulą 'where', aby uniknąć warningów dla wierszy z samymi zerami
+    cm_normalized = np.divide(cm_data.astype('float'), cm_sum, out=np.zeros_like(cm_data, dtype=float),
+                              where=(cm_sum != 0))
+
+    # Formatowanie adnotacji, aby pokazać zarówno liczbę, jak i procent
+    annot = np.empty_like(cm_data).astype(str)
+    rows, cols = cm_data.shape
+    for r in range(rows):
+        for c in range(cols):
+            count = cm_data[r, c]
+            percent = cm_normalized[r, c]
+            if count == 0 and percent == 0:
+                annot[r, c] = '0'
+            else:
+                annot[r, c] = f'{count}\\n({percent:.1%})'
+
+    sns.heatmap(
+        cm_normalized,
+        annot=annot,
+        fmt='',  # Używamy pustego formatu, bo adnotacje są już sformatowanymi stringami
+        cmap='Blues',
+        xticklabels=class_names,
+        yticklabels=class_names,
+        cbar=True,
+        vmin=0.0,  # Ustawienie zakresu paska kolorów
+        vmax=1.0
+    )
+    plt.title('Macierz pomyłek (dla najlepszej epoki wg Composite Score)')
+    plt.ylabel('Prawdziwa etykieta')
+    plt.xlabel('Przewidziana etykieta')
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    return str(output_path)
