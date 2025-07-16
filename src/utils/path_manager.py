@@ -1,9 +1,14 @@
 from pathlib import Path
 from datetime import datetime
 
+
 class PathManager:
-    def __init__(self, project_root: Path, cfg):
-        self.project_root = project_root.resolve()
+    def __init__(self, project_root: Path = None, cfg=None):
+        if project_root is None:
+            self.project_root = Path(__file__).resolve().parent.parent.parent
+        else:
+            self.project_root = project_root.resolve()
+
         self.cfg = cfg
         self.experiment_date = datetime.now().strftime("%Y-%m-%d")
 

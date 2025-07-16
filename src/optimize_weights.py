@@ -8,14 +8,17 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from src.engine.trainer import Trainer
+from src.utils.path_manager import PathManager
 
 
 def objective(trial: optuna.Trial):
     """
     Funkcja celu dla Optuny. Wykonuje jeden pełny trening i zwraca metrykę do maksymalizacji.
     """
-    # 1. Załaduj bazową konfigurację z pliku
-    base_cfg = OmegaConf.load("src/config/config.yaml")
+    # 1. Użyj PathManager do uzyskania ścieżki do konfiguracji, aby zachować spójność
+    pm = PathManager()
+    config_path = pm.config_path()
+    base_cfg = OmegaConf.load(config_path)
 
     # 2. Zaproponuj wartości wag alpha i beta (gamma będzie obliczona, aby suma była 1)
     alpha = trial.suggest_float("alpha", 0.0, 1.0)
