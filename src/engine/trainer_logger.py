@@ -8,12 +8,10 @@ def init_metrics_logger(trainer, log_dir, full_name):
     trainer.metrics_file = open(metrics_file_path, mode="w", newline="")
     trainer.metrics_writer = csv.writer(trainer.metrics_file)
 
-    # 🟢 ZMIANA: Użyj population_mapper do opisania klas biologicznych
     class_labels = list(range(len(trainer.population_mapper.active_populations)))   # 🟢 ZMIANA
     biologic_labels = [trainer.population_mapper.to_pop(idx) for idx in class_labels]  # 🟢 ZMIANA
     class_headers = [f"Train Class {bio} (idx {idx})" for bio, idx in zip(biologic_labels, class_labels)]  # 🟢 ZMIANA
 
-    # 🟣 ZMIANA multitask: Dodajemy dodatkowe kolumny do nagłówka
     multitask_headers = [
         'Train Classification Loss', 'Val Classification Loss',
         'Train Regression Loss', 'Val Regression Loss'

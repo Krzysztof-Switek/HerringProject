@@ -2,9 +2,11 @@ import time
 from datetime import datetime
 import torch
 import torch.optim as optim
-import numpy as np # <-- DODANO IMPORT NUMPY
+import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 from omegaconf import OmegaConf
+from pathlib import Path
+
 from models.model import HerringModel
 from models.multitask_model import MultiTaskHerringModel
 from engine.loss_utills import LossFactory, MultiTaskLossWrapper
@@ -13,13 +15,16 @@ from .trainer_logger import (
     init_metrics_logger,
     log_epoch_metrics,
     save_best_model,
-    should_stop_early
+    should_stop_early,
+    log_augmentation_summary
 )
 from engine.train_loop import train_epoch, validate
 from engine.predict_after_training import run_full_dataset_prediction
+from utils.Training_Prediction_Report import TrainingPredictionReport
 
 
 def run_training_loop(trainer):
+    """Główna pętla treningowa. Zwraca krotkę (best_score, log_dir) dla Optuny."""
     train_loader, val_loader, class_names = trainer.data_loader.get_loaders()
     trainer.class_names = class_names
 
@@ -35,6 +40,7 @@ def run_training_loop(trainer):
     class_counts = metadata["class_counts"]
     class_freq = metadata["class_freq"]
 
+    # Pętla po funkcjach straty. Dla Optuny, ta lista powinna zawierać tylko jeden element.
     for loss_name in trainer.cfg.training.loss_type:
         print(f"\n🎯 Start treningu z funkcją straty: {loss_name}")
 
@@ -45,7 +51,6 @@ def run_training_loop(trainer):
         )
         classification_loss = loss_factory.get()
 
-        # Loss wrapper
         if is_multitask:
             loss_fn = MultiTaskLossWrapper(
                 classification_loss=classification_loss,
@@ -53,11 +58,9 @@ def run_training_loop(trainer):
                 method=trainer.cfg.multitask_model.loss_weighting.method,
                 static_weights=getattr(trainer.cfg.multitask_model.loss_weighting, "static", None)
             )
-
         else:
             loss_fn = classification_loss
 
-        # Model
         trainer.model = (
             MultiTaskHerringModel(trainer.cfg).to(trainer.device)
             if is_multitask else
@@ -74,47 +77,35 @@ def run_training_loop(trainer):
         )
 
         timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M')
-        if is_multitask:
-            mode_type = "multi"
-        elif getattr(trainer.cfg, "expert_model", {}).get("use", False):
-            mode_type = "expert"
-        else:
-            mode_type = "basic"
+        mode_type = "multi" if is_multitask else "basic"
         full_name = f"{model_name}_{loss_name}_{mode_type}_{timestamp}"
         log_dir = logs_root / full_name
         checkpoint_dir = checkpoint_root / full_name
         log_dir.mkdir(parents=True, exist_ok=True)
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-        trainer.writer = SummaryWriter(log_dir=str(log_dir))
+        # Ustawienie log_dir w obiekcie trainer, aby był dostępny na zewnątrz
         trainer.log_dir = log_dir
-        # trainer.best_acc = 0.0 # Zastąpione przez best_score
-        trainer.best_score = -float('inf') # Inicjalizacja dla composite_score
-        trainer.early_stop_counter = 0
-        trainer.best_cm = None # Pozostaje, jeśli chcemy logować CM najlepszego modelu
 
+        # Inicjalizacja loggerów
+        trainer.writer = SummaryWriter(log_dir=str(log_dir)) if trainer.cfg.training.get("use_tensorboard",
+                                                                                         False) else None
+        trainer.best_score = -float('inf')
+        trainer.early_stop_counter = 0
+        trainer.best_cm = None
         init_metrics_logger(trainer, log_dir, full_name)
 
-        # Zapis minimalistycznej konfiguracji przebiegu do params.yaml
         params_to_save = {
-            'model_name_used': model_name,  # Używamy zmiennej model_name zdefiniowanej wcześniej w pętli
-            'model_mode': mode_type,    # Używamy zmiennej mode_type zdefiniowanej wcześniej w pętli
-            'loss_function_used': loss_name, # Bieżąca funkcja straty z pętli
-            'run_timestamp': timestamp  # Timestamp dla tego konkretnego przebiegu (loss_name + model_mode)
+            'model_name_used': model_name,
+            'model_mode': mode_type,
+            'loss_function_used': loss_name,
+            'run_timestamp': timestamp
         }
-
-        # Dodaj wagi composite_score, jeśli model jest multitask i wagi są zdefiniowane
-        if mode_type == "multitask" and \
-           hasattr(trainer.cfg, 'multitask_model') and \
-           trainer.cfg.multitask_model and \
-           hasattr(trainer.cfg.multitask_model, 'metrics_weights') and \
-           trainer.cfg.multitask_model.metrics_weights:
+        if mode_type == "multitask" and hasattr(trainer.cfg.multitask_model, 'metrics_weights'):
             try:
                 weights = trainer.cfg.multitask_model.metrics_weights
                 params_to_save['composite_score_weights'] = {
-                    'alpha': weights.alpha,
-                    'beta': weights.beta,
-                    'gamma': weights.gamma
+                    'alpha': weights.alpha, 'beta': weights.beta, 'gamma': weights.gamma
                 }
             except Exception as e:
                 print(f"⚠️ Nie udało się pobrać wag composite_score do params.yaml: {e}")
@@ -123,100 +114,86 @@ def run_training_loop(trainer):
         try:
             omega_conf_to_save = OmegaConf.create(params_to_save)
             OmegaConf.save(config=omega_conf_to_save, f=str(params_file_path))
-            print(f"💾 Zapisano minimalistyczną konfigurację przebiegu (model, tryb, loss, timestamp, wagi) do: {params_file_path}")
-            if trainer.debug_mode: # Użyj trainer.debug_mode
-                print(f"   Zawartość params.yaml dla debugu: {OmegaConf.to_yaml(omega_conf_to_save)}")
+            print(f"💾 Zapisano konfigurację przebiegu do: {params_file_path}")
         except Exception as e:
-            print(f"⚠️ Nie udało się zapisać minimalistycznej konfiguracji przebiegu (params.yaml): {e}")
+            print(f"⚠️ Nie udało się zapisać konfiguracji przebiegu (params.yaml): {e}")
 
         for epoch in range(trainer.cfg.training.epochs):
             start_time = time.time()
-
             train_metrics = train_epoch(
-                model=trainer.model,
-                device=trainer.device,
-                dataloader=train_loader,
-                loss_fn=loss_fn,
-                optimizer=optimizer,
-                population_mapper=trainer.population_mapper
+                trainer.model, trainer.device, train_loader, loss_fn, optimizer, trainer.population_mapper
             )
-
             val_metrics = validate(
-                model=trainer.model,
-                device=trainer.device,
-                dataloader=val_loader,
-                loss_fn=loss_fn,
-                population_mapper=trainer.population_mapper,
-                cfg=trainer.cfg # <-- Przekazanie konfiguracji
+                trainer.model, trainer.device, val_loader, loss_fn, trainer.population_mapper, trainer.cfg
             )
-
             epoch_time = time.time() - start_time
+            log_epoch_metrics(trainer, epoch, loss_name, train_metrics, val_metrics, epoch_time)
 
-            log_epoch_metrics(
-                trainer,
-                epoch,
-                loss_name,
-                train_metrics,
-                val_metrics,
-                epoch_time
-            )
-
-            # Pobieramy composite_score z metryk walidacyjnych
             current_composite_score = val_metrics.get("composite_score", np.nan)
-            # Jeśli composite_score to NaN, save_best_model sobie z tym poradzi
-
             trainer, improved = save_best_model(
-                trainer,
-                current_composite_score, # Przekazujemy composite_score
-                val_metrics["cm"],       # CM nadal jest przydatne
-                model_name,
-                loss_name,
-                checkpoint_dir
+                trainer, current_composite_score, val_metrics["cm"], model_name, loss_name, checkpoint_dir
             )
 
             if not improved:
                 trainer.early_stop_counter += 1
-                print(f"⚠️ Early stop counter: {trainer.early_stop_counter}")
-
             if should_stop_early(trainer):
-                print(f"🚍 Trening ({loss_name}) przerwany po {epoch + 1} epokach z powodu braku poprawy ACC")
+                print(f"🚍 Trening ({loss_name}) przerwany po {epoch + 1} epokach.")
                 break
-
             scheduler.step()
-
             if getattr(trainer.cfg.training, "stop_after_one_epoch", False):
-                print("🛑 Trening przerwany po jednej epoce – tryb testowy pipeline'u.")
+                print("🛑 Trening przerwany po jednej epoce (tryb testowy).")
                 break
 
-        trainer.metrics_file.close()
+        if hasattr(trainer, 'metrics_file') and trainer.metrics_file:
+            trainer.metrics_file.close()
         if trainer.writer:
             trainer.writer.close()
 
         if trainer.last_model_path is not None:
-            print(f"🔍 Uruchamianie predykcji dla {loss_name} na całym zbiorze...")
-            from .trainer_logger import log_augmentation_summary
-            log_augmentation_summary(trainer.data_loader.augment_applied, full_name, log_dir=log_dir)
+            if hasattr(trainer.data_loader, 'augment_applied'):
+                log_augmentation_summary(trainer.data_loader.augment_applied, full_name, log_dir=log_dir)
+
+            limit_for_prediction = 100 if trainer.debug_mode else None
             run_full_dataset_prediction(
                 loss_name=loss_name,
                 model_path=str(trainer.last_model_path),
                 path_manager=trainer.path_manager,
                 log_dir=log_dir,
-                full_name=full_name
+                full_name=full_name,
+                limit_predictions=limit_for_prediction
             )
 
             try:
-                from utils.Training_Prediction_Report import TrainingPredictionReport
                 predictions_path = log_dir / f"{full_name}_predictions.xlsx"
+                metrics_file_path = log_dir / f"{full_name}_training_metrics.csv"
+                augmentation_file_path = log_dir / f"augmentation_summary_{full_name}.csv"
+
+                run_params_data = None
+                if params_file_path.exists():
+                    try:
+                        run_params_data = OmegaConf.load(params_file_path)
+                    except Exception as e_params:
+                        print(f"⚠️ Nie udało się wczytać params.yaml ({params_file_path}) dla raportu: {e_params}")
+
                 print(f"📑 Generuję raport PDF podsumowujący cały trening oraz predykcję w: {log_dir}")
                 report = TrainingPredictionReport(
                     log_dir=log_dir,
-                    config_path=trainer.path_manager.config_path(),
+                    base_config_obj=trainer.cfg,
+                    run_params_obj=run_params_data,
                     predictions_path=predictions_path,
-                    metadata_path=trainer.path_manager.metadata_file()
+                    metadata_path=trainer.path_manager.metadata_file(),
+                    metrics_path=metrics_file_path if metrics_file_path.exists() else None,
+                    augmentation_path=augmentation_file_path if augmentation_file_path.exists() else None
                 )
                 report.run()
             except Exception as e:
                 print(f"⚠️ Nie udało się wygenerować raportu PDF: {e}")
-
         else:
             print(f"⚠️ Brak zapisanego modelu dla {loss_name}, predykcja pominięta.")
+
+    # --- NOWA SEKCJA ZWRACAJĄCA WYNIK DLA OPTUNY ---
+    best_score_for_this_run = trainer.best_score
+    if not np.isfinite(best_score_for_this_run):
+        best_score_for_this_run = 0.0
+
+    return best_score_for_this_run, trainer.log_dir
