@@ -1,18 +1,12 @@
 import sys
 import os
 from pathlib import Path
-import itertools
 import csv
-from omegaconf import OmegaConf, DictConfig
+from omegaconf import OmegaConf
+import numpy as np
 
-# Dodanie src do PYTHONPATH, aby umożliwić importy z src/
-# Zakładamy, że run_grid_search.py jest w src/
-# Jeśli jest gdzie indziej, trzeba dostosować ścieżkę
+
 sys.path.append(str(Path(__file__).resolve().parent.parent))
-
-from src.engine.trainer import Trainer # Zakładając, że Trainer jest w src.engine.trainer
-# Jeśli ścieżki są inne, dostosuj import:
-# from engine.trainer import Trainer
 
 def run_single_training(config_path: str, project_root: Path, current_weights: dict) -> dict:
     """
@@ -35,9 +29,10 @@ def run_single_training(config_path: str, project_root: Path, current_weights: d
     if 'metrics_weights' not in modified_cfg_dict['multitask_model']:
         modified_cfg_dict['multitask_model']['metrics_weights'] = {}
 
-    modified_cfg_dict['multitask_model']['metrics_weights']['alpha'] = current_weights['alpha']
-    modified_cfg_dict['multitask_model']['metrics_weights']['beta'] = current_weights['beta']
-    modified_cfg_dict['multitask_model']['metrics_weights']['gamma'] = current_weights['gamma']
+    # Konwersja na standardowy typ float, aby uniknąć błędu OmegaConf
+    modified_cfg_dict['multitask_model']['metrics_weights']['alpha'] = float(current_weights['alpha'])
+    modified_cfg_dict['multitask_model']['metrics_weights']['beta'] = float(current_weights['beta'])
+    modified_cfg_dict['multitask_model']['metrics_weights']['gamma'] = float(current_weights['gamma'])
 
     # Stwórz tymczasowy plik konfiguracyjny lub przekaż DictConfig do Trainer
     # Przekazanie DictConfig jest czystsze, jeśli Trainer to obsługuje.
@@ -158,11 +153,11 @@ def main():
             if alpha + beta < 1.0: # Gamma musi być > 0
                 gamma = 1.0 - alpha - beta
                 if gamma > 0: # Upewnij się, że gamma jest dodatnia
-                     # Zaokrąglenie, aby uniknąć problemów z precyzją float
+                     # Zaokrąglenie i konwersja na float
                     weight_combinations.append({
-                        "alpha": round(alpha, 2),
-                        "beta": round(beta, 2),
-                        "gamma": round(gamma, 2)
+                        "alpha": float(round(alpha, 2)),
+                        "beta": float(round(beta, 2)),
+                        "gamma": float(round(gamma, 2))
                     })
             # Można też dodać przypadki brzegowe, np. (1,0,0), (0,1,0), (0,0,1)
 
