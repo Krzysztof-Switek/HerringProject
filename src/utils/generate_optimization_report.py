@@ -1,9 +1,8 @@
 import pandas as pd
 import plotly.express as px
 
-def generate_report(results_path="src/optuna_results.csv", output_path="optimization_report.html"):
-    """def generate_report(results_path="src/optuna_results.csv", output_path="optimization_report.html"):
-
+def generate_report(results_path="src/optuna_results.csv", output_path="optimization_report.html", trail_start=None, trail_stop=None):
+    """
     Generates a parallel coordinates plot from Optuna results to visualize hyperparameter optimization.
 
     Args:
@@ -15,6 +14,12 @@ def generate_report(results_path="src/optuna_results.csv", output_path="optimiza
     except FileNotFoundError:
         print(f"Error: The file '{results_path}' was not found.")
         return
+
+    # Filter trials based on the specified range
+    if trail_start is not None:
+        df = df[df['number'] >= trail_start]
+    if trail_stop is not None:
+        df = df[df['number'] <= trail_stop]
 
     # Calculate gamma
     if 'params_alpha' in df.columns and 'params_beta' in df.columns:
@@ -43,4 +48,12 @@ def generate_report(results_path="src/optuna_results.csv", output_path="optimiza
     print(f"Optimization report saved to '{output_path}'")
 
 if __name__ == "__main__":
+    # Example usage:
+    # Generate a report for all trials
     generate_report()
+
+    # Generate a report for trials from 10 to 50
+    generate_report(trail_start=10, trail_stop=50, output_path="optimization_report_10_50.html")
+
+    # Generate a report for trials from 50 onwards
+    generate_report(trail_start=50, output_path="optimization_report_50_onwards.html")
