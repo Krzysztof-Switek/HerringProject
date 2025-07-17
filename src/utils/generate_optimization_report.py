@@ -1,8 +1,9 @@
 import pandas as pd
 import plotly.express as px
 
-def generate_report(results_path="optuna_results.csv", output_path="optimization_report.html"):
-    """
+def generate_report(results_path="src/optuna_results.csv", output_path="optimization_report.html"):
+    """def generate_report(results_path="src/optuna_results.csv", output_path="optimization_report.html"):
+
     Generates a parallel coordinates plot from Optuna results to visualize hyperparameter optimization.
 
     Args:
