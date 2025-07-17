@@ -1,6 +1,7 @@
 import matplotlib
 import matplotlib.pyplot as plt
 from pathlib import Path
+import pandas as pd
 
 from .report_constants import (
     USABLE_WIDTH,
@@ -93,6 +94,33 @@ def plot_single_metric(metrics_df, save_path, column_name, title, y_label):
         _plot_placeholder(save_path, f"Brak danych dla\\n{column_name}", fig_width_inch, fig_height_inch)
 
 
+def plot_train_val_metric(metrics_df, save_path, metric_base_name, title, y_label):
+    """Generyczna funkcja do rysowania metryki w czasie dla treningu i walidacji."""
+    fig_width_inch = USABLE_WIDTH / 2 / 25.4
+    fig_height_inch = MATPLOT_FIG_HEIGHT
+    dpi = MATPLOTLIB_DEFAULTS.get("figure.dpi", 150)
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+
+    train_col = f"Train {metric_base_name}"
+    val_col = f"Val {metric_base_name}"
+
+    if metrics_df is not None and not metrics_df.empty and train_col in metrics_df.columns and val_col in metrics_df.columns:
+        epochs = list(range(1, len(metrics_df) + 1))
+        plt.figure(figsize=(fig_width_inch, fig_height_inch), dpi=dpi)
+        plt.plot(epochs, metrics_df[train_col], label=f"Train {metric_base_name}", marker="o")
+        plt.plot(epochs, metrics_df[val_col], label=f"Val {metric_base_name}", marker="o")
+        plt.ylabel(y_label)
+        plt.xlabel("Epoka")
+        plt.title(title)
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=dpi)
+        plt.close()
+    else:
+        _plot_placeholder(save_path, f"Brak danych dla\\n{metric_base_name}", fig_width_inch, fig_height_inch)
+
+
 def plot_loss_components(metrics_df, save_path):
     """Wykres strat składowych (train/val, classification/regression) na podstawie df z metrykami."""
     fig_width_inch = USABLE_WIDTH / 2 / 25.4
@@ -125,7 +153,37 @@ def plot_loss_components(metrics_df, save_path):
         _plot_placeholder(save_path, "Brak danych\\nstrat składowych", fig_width_inch, fig_height_inch)
 
 
-def generate_all_plots(metrics_df, cm_data, class_names, log_dir):
+def plot_bayesian_optimization_weights(log_dir, save_path):
+    """Wykres wag optymalizacji bayesowskiej w czasie."""
+    fig_width_inch = USABLE_WIDTH / 2 / 25.4
+    fig_height_inch = MATPLOT_FIG_HEIGHT
+    dpi = MATPLOTLIB_DEFAULTS.get("figure.dpi", 150)
+    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+
+    log_file = log_dir / "bayesian_optimization_log.csv"
+    if log_file.exists():
+        try:
+            df = pd.read_csv(log_file)
+            plt.figure(figsize=(fig_width_inch, fig_height_inch), dpi=dpi)
+            plt.plot(df["epoch"], df["alpha"], label="Alpha (F1 Global)", marker="o")
+            plt.plot(df["epoch"], df["beta"], label="Beta (MAE Age)", marker="o")
+            plt.plot(df["epoch"], df["gamma"], label="Gamma (F1 Subgroup)", marker="o")
+            plt.ylabel("Waga")
+            plt.xlabel("Epoka")
+            plt.title("Wagi optymalizacji Bayesowskiej")
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(save_path, dpi=dpi)
+            plt.close()
+        except Exception as e:
+            print(f"Error plotting Bayesian optimization weights: {e}")
+            _plot_placeholder(save_path, "Błąd w danych\\noptymalizacji Bayesowskiej", fig_width_inch, fig_height_inch)
+    else:
+        _plot_placeholder(save_path, "Brak danych\\noptymalizacji Bayesowskiej", fig_width_inch, fig_height_inch)
+
+
+def generate_all_plots(metrics_df, cm_data, class_names, log_dir, predictions_df=None):
     """Generuje wszystkie wykresy dla raportu i zwraca listę ścieżek do plików."""
     print("[DEBUG] Uruchomiono generate_all_plots.")
     images = []
@@ -149,19 +207,18 @@ def generate_all_plots(metrics_df, cm_data, class_names, log_dir):
         plot_training_loss(metrics_df, tmp_loss)
         images.append(tmp_loss)
 
-        # Nowe wykresy
-        print(f"[DEBUG] Sprawdzam warunek dla 'Val Composite Score': {'Val Composite Score' in metrics_df.columns}")
-        if 'Val Composite Score' in metrics_df.columns:
-            tmp_comp_score = log_dir / "__temp_composite_score.png"
-            plot_single_metric(metrics_df, tmp_comp_score, 'Val Composite Score', 'Composite Score (Walidacja)',
-                               'Score')
-            images.append(tmp_comp_score)
+        # Nowe wykresy metryk (train/val)
+        metrics_to_plot = {
+            "F1": "F1 Score",
+            "MAE Age": "MAE Age",
+            "F1 Pop2 Age3-6": "F1 Subgroup",
+            "Composite Score": "Composite Score"
+        }
 
-        print(f"[DEBUG] Sprawdzam warunek dla 'Val MAE Age': {'Val MAE Age' in metrics_df.columns}")
-        if 'Val MAE Age' in metrics_df.columns:
-            tmp_mae = log_dir / "__temp_mae_age.png"
-            plot_single_metric(metrics_df, tmp_mae, 'Val MAE Age', 'MAE Age (Walidacja)', 'MAE')
-            images.append(tmp_mae)
+        for metric, title in metrics_to_plot.items():
+            tmp_path = log_dir / f"__temp_{metric.lower().replace(' ', '_')}.png"
+            plot_train_val_metric(metrics_df, tmp_path, metric, f"{title} (Train/Val)", title)
+            images.append(tmp_path)
 
         loss_comp_cols = ["Train Classification Loss", "Val Classification Loss", "Train Regression Loss",
                           "Val Regression Loss"]
@@ -172,9 +229,60 @@ def generate_all_plots(metrics_df, cm_data, class_names, log_dir):
             plot_loss_components(metrics_df, tmp_loss_comp)
             images.append(tmp_loss_comp)
 
+    # Wykres wag optymalizacji Bayesowskiej
+    tmp_bayes_opt = log_dir / "__temp_bayes_opt.png"
+    plot_bayesian_optimization_weights(log_dir, tmp_bayes_opt)
+    images.append(tmp_bayes_opt)
+
+    # Histogramy klasyfikacji
+    images.extend(plot_classification_histograms(predictions_df, log_dir))
+
     print(f"[DEBUG] generate_all_plots zwraca {len(images)} obrazów.")
     return images
 
+
+def plot_classification_histograms(predictions_df, log_dir):
+    """Generuje histogramy poprawności klasyfikacji dla każdej populacji."""
+    if predictions_df is None or predictions_df.empty:
+        return []
+
+    images = []
+    populations = predictions_df["Population"].unique()
+    for pop in populations:
+        save_path = log_dir / f"__temp_hist_pop_{pop}.png"
+        fig_width_inch = USABLE_WIDTH / 2 / 25.4
+        fig_height_inch = MATPLOT_FIG_HEIGHT
+        dpi = MATPLOTLIB_DEFAULTS.get("figure.dpi", 150)
+
+        pop_df = predictions_df[predictions_df["Population"] == pop].copy()
+        pop_df["Correct"] = pop_df["Population"] == pop_df["Prediction"]
+
+        # Ensure age is numeric
+        pop_df["Age"] = pd.to_numeric(pop_df["Age"], errors='coerce')
+        pop_df.dropna(subset=["Age"], inplace=True)
+        pop_df["Age"] = pop_df["Age"].astype(int)
+
+
+        age_groups = sorted(pop_df["Age"].unique())
+        correct_counts = pop_df[pop_df["Correct"]].groupby("Age").size()
+        incorrect_counts = pop_df[~pop_df["Correct"]].groupby("Age").size()
+
+        counts = pd.DataFrame({
+            "Correct": correct_counts,
+            "Incorrect": incorrect_counts
+        }).reindex(age_groups).fillna(0)
+
+        plt.figure(figsize=(fig_width_inch, fig_height_inch), dpi=dpi)
+        counts.plot(kind="bar", stacked=True, color=["green", "red"])
+        plt.title(f"Poprawność klasyfikacji dla Populacji {pop}")
+        plt.xlabel("Grupa wiekowa")
+        plt.ylabel("Liczba obserwacji")
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=dpi)
+        plt.close()
+        images.append(save_path)
+    return images
 
 def plot_confusion_matrix(cm_data, class_names, output_path, figsize=(8, 6)):
     """

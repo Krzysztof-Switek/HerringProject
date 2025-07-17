@@ -322,7 +322,8 @@ class TrainingPredictionReport:
             metrics_df=self.metrics,
             cm_data=self.confusion_matrix,
             class_names=[str(p) for p in self.base_config.data.active_populations],
-            log_dir=self.log_dir
+            log_dir=self.log_dir,
+            predictions_df=self.predictions
         )
         print(f"[DEBUG] Lista plików z wykresami do dodania: {plot_files}")
 
