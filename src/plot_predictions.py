@@ -49,7 +49,7 @@ def test_loss_integration_with_model(cfg, loss_fn):
 
     # Dane
     dataset = HerringDataset(cfg)
-    train_loader, _, _ = dataset.get_loaders()  # 🟡 ZMIANA: zamiast dataset.train_set
+    train_loader, _, _ = dataset.get_loaders()
     inputs, targets, meta = next(iter(train_loader))
 
     inputs, targets = inputs.to(device), targets.to(device)
@@ -58,12 +58,12 @@ def test_loss_integration_with_model(cfg, loss_fn):
 
     # Forward
     outputs = model(inputs)
-    preds = outputs.argmax(dim=1)  # 🟡 ZMIANA: rozkład predykcji
+    preds = outputs.argmax(dim=1)
     print(f"\n[{loss_fn.__class__.__name__}] Predykcje: {torch.bincount(preds).cpu().tolist()}")
     print(f"[{loss_fn.__class__.__name__}] Targety:    {torch.bincount(targets).cpu().tolist()}")
 
     # Sprawdź, czy model nie przewiduje zawsze jednej klasy
-    assert (preds != preds[0]).any(), f"{loss_fn.__class__.__name__} zawsze przewiduje jedną klasę"  # 🟡 ZMIANA
+    assert (preds != preds[0]).any(), f"{loss_fn.__class__.__name__} zawsze przewiduje jedną klasę"
 
     # Loss + backward
     loss = loss_fn(outputs, targets, meta)

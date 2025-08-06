@@ -8,7 +8,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 # ============================
 # 🔧 USTAWIENIA UŻYTKOWNIKA
-log_dir = "resnet50_29-05"
+log_dir = "BEST_resnet50_standard_ce_multi_2025-07-19_19-24"
 # ============================
 
 def load_metrics(log_dir):
