@@ -40,41 +40,79 @@ def excel_col_to_int(col_str: str) -> int:
     return index - 1
 
 
-def plot_population_confusion_matrix(df: pd.DataFrame):
-    """Generuje macierz pomyłek dla predykcji populacji."""
-    from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+def create_prediction_summary_page(df: pd.DataFrame, log_dir: Path):
+    """Tworzy stronę tytułową/podsumowującą dla raportu predykcji."""
+    fig, ax = plt.subplots(figsize=(8.5, 11))
+    ax.axis("off")
 
-    # Upewnij się, że obie kolumny są tego samego typu, aby uniknąć błędów
-    true_pop = df['Populacja'].astype(str)
-    pred_pop = df['populacja_pred'].astype(str)
+    run_name = log_dir.name
+    num_rows = len(df)
 
-    # Znajdź wszystkie unikalne etykiety w danych, aby zapewnić spójność
-    labels = sorted(list(set(true_pop) | set(pred_pop)))
+    summary_text = f"""
+    Raport z Analizy Predykcji
+    ===================================
 
-    cm = confusion_matrix(true_pop, pred_pop, labels=labels)
+    Analizowany przebieg:
+    --------------------
+    Katalog logów: {run_name}
 
-    fig, ax = plt.subplots(figsize=(8, 8))
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
-    disp.plot(ax=ax, cmap='Blues', xticks_rotation='vertical')
 
-    ax.set_title('Macierz pomyłek dla predykcji populacji')
-    plt.tight_layout()
+    Podstawowe statystyki:
+    --------------------
+    Liczba przeanalizowanych wierszy: {num_rows}
+    (Po odfiltrowaniu wierszy bez 'SET' i z `Wiek == -9`)
+
+    """
+
+    ax.text(0.05, 0.95, summary_text, fontsize=12, va='top', family='monospace')
     return fig
 
 
-def plot_probability_distribution(df: pd.DataFrame):
+def plot_population_confusion_matrices(df: pd.DataFrame):
     """
-    Generuje wykresy rozkładu prawdopodobieństw dla poprawnych i błędnych predykcji.
+    Generuje 4 macierze pomyłek dla predykcji populacji na jednej stronie:
+    Ogólną, dla zbioru TRAIN, VAL i TEST.
     """
-    df['is_correct'] = df['Populacja'] == df['populacja_pred']
+    from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    sns.kdeplot(data=df, x='prediction_probability', hue='is_correct', fill=True, ax=ax)
+    datasets = ['Overall', 'TRAIN', 'VAL', 'TEST']
 
-    ax.set_title('Rozkład prawdopodobieństwa predykcji')
-    ax.set_xlabel('Prawdopodobieństwo')
-    ax.set_ylabel('Gęstość')
-    plt.tight_layout()
+    fig, axes = plt.subplots(2, 2, figsize=(15, 15), constrained_layout=True)
+    axes = axes.flatten()
+
+    all_true_pop = df['Populacja'].astype(str)
+    all_pred_pop = df['populacja_pred'].astype(str)
+    all_labels = sorted(list(set(all_true_pop) | set(all_pred_pop)))
+
+    for i, dataset_name in enumerate(datasets):
+        ax = axes[i]
+
+        if dataset_name == 'Overall':
+            subset_df = df
+            title = 'Macierz pomyłek (Ogólna)'
+        else:
+            subset_df = df[df['SET'] == dataset_name]
+            title = f'Macierz pomyłek (SET: {dataset_name})'
+
+        if subset_df.empty:
+            ax.text(0.5, 0.5, 'Brak danych', ha='center', va='center')
+            ax.set_title(title)
+            ax.axis('off')
+            continue
+
+        true_pop = subset_df['Populacja'].astype(str)
+        pred_pop = subset_df['populacja_pred'].astype(str)
+
+        cm = confusion_matrix(true_pop, pred_pop, labels=all_labels)
+
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=all_labels)
+        disp.plot(ax=ax, cmap='Blues', xticks_rotation='vertical')
+
+        ax.set_title(title)
+        ax.set_xlabel('Populacja przewidziana (populacja_pred)')
+        ax.set_ylabel('Populacja prawdziwa (Populacja)')
+
+    fig.suptitle('Macierze pomyłek dla predykcji populacji', fontsize=16)
     return fig
 
 
@@ -102,9 +140,9 @@ def plot_age_scatter(df: pd.DataFrame):
         ax = axes[i]
         pop_df = df[df['Populacja'] == pop]
 
-        ax.scatter(pop_df['Wiek'], pop_df['age_pred'], alpha=0.6)
+        # Użycie rasterized=True, aby zmniejszyć rozmiar pliku PDF
+        ax.scatter(pop_df['Wiek'], pop_df['age_pred'], alpha=0.6, rasterized=True)
 
-        # Linia y=x dla idealnej predykcji
         lims = [
             min(ax.get_xlim()[0], ax.get_ylim()[0]),
             max(ax.get_xlim()[1], ax.get_ylim()[1]),
@@ -114,8 +152,8 @@ def plot_age_scatter(df: pd.DataFrame):
         ax.set_ylim(lims)
 
         ax.set_title(f'Populacja {pop}')
-        ax.set_xlabel('Wiek biologiczny')
-        ax.set_ylabel('Wiek przewidziany')
+        ax.set_xlabel('Wiek biologiczny (Wiek)')
+        ax.set_ylabel('Wiek przewidziany (age_pred)')
         ax.legend()
         ax.grid(True)
 
@@ -155,8 +193,8 @@ def plot_probability_by_age_class(df: pd.DataFrame):
         sns.boxplot(x='Wiek', y='prediction_probability', data=pop_df, ax=ax, order=sorted_ages)
 
         ax.set_title(f'Rozkład prawdopodobieństwa dla Populacji {pop}')
-        ax.set_xlabel('Klasa wiekowa')
-        ax.set_ylabel('Prawdopodobieństwo predykcji')
+        ax.set_xlabel('Klasa wiekowa (Wiek)')
+        ax.set_ylabel('Prawdopodobieństwo predykcji (prediction_probability)')
         ax.tick_params(axis='x', rotation=45)
 
     # Ukryj puste osie
@@ -168,15 +206,20 @@ def plot_probability_by_age_class(df: pd.DataFrame):
 
 
 def plot_age_confusion_matrices_per_population(df: pd.DataFrame):
-    """Generuje macierze pomyłek dla predykcji wieku dla każdej populacji."""
+    """Generuje macierze pomyłek dla predykcji wieku dla każdej populacji na jednej stronie."""
     from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
     populations = sorted(df['Populacja'].unique())
 
     if not populations:
         return None
 
-    figs = []
-    for pop in populations:
+    num_plots = len(populations)
+    fig, axes = plt.subplots(1, num_plots, figsize=(10 * num_plots, 10), constrained_layout=True)
+    if num_plots == 1:
+        axes = [axes]  # make it iterable
+
+    for i, pop in enumerate(populations):
+        ax = axes[i]
         pop_df = df[df['Populacja'] == pop]
         true_age = pop_df['Wiek'].astype(int)
         pred_age = pop_df['age_pred'].astype(int)
@@ -185,24 +228,62 @@ def plot_age_confusion_matrices_per_population(df: pd.DataFrame):
 
         cm = confusion_matrix(true_age, pred_age, labels=labels)
 
-        fig, ax = plt.subplots(figsize=(10, 10))
         disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=labels)
         disp.plot(ax=ax, cmap='Greens', text_kw={'color': 'black'})
 
         # Podświetlenie przekątnej
-        for i in range(len(labels)):
-            for j in range(len(labels)):
-                if i == j:
-                    disp.text_[i, j].set_weight('bold')
-                    disp.text_[i, j].set_color('blue')
+        for r in range(len(labels)):
+            for c in range(len(labels)):
+                if r == c:
+                    disp.text_[r, c].set_weight('bold')
+                    disp.text_[r, c].set_color('blue')
 
         ax.set_title(f'Macierz pomyłek wieku - Populacja {pop}')
         ax.set_xlabel('Wiek przewidziany (age_pred)')
         ax.set_ylabel('Wiek prawdziwy (Wiek)')
-        plt.tight_layout()
-        figs.append(fig)
 
-    return figs
+    fig.suptitle('Macierze pomyłek dla predykcji wieku wg populacji', fontsize=16)
+    return fig
+
+
+def plot_correctness_by_age_stacked_bar(df: pd.DataFrame):
+    """
+    Generuje skumulowane wykresy słupkowe pokazujące poprawność predykcji populacji
+    w zależności od wieku, dla każdej populacji osobno, na jednej stronie.
+    """
+    populations = sorted(df['Populacja'].unique())
+
+    if not populations:
+        return None
+
+    num_plots = len(populations)
+    fig, axes = plt.subplots(num_plots, 1, figsize=(10, 7 * num_plots), constrained_layout=True)
+    if num_plots == 1:
+        axes = [axes]  # make it iterable
+
+    for i, pop in enumerate(populations):
+        ax = axes[i]
+        pop_df = df[df['Populacja'] == pop].copy()
+        pop_df['is_correct'] = pop_df['Populacja'] == pop_df['populacja_pred']
+
+        counts = pop_df.groupby(['Wiek', 'is_correct']).size().unstack(fill_value=0)
+        counts.rename(columns={True: 'Poprawne', False: 'Błędne'}, inplace=True)
+
+        if 'Błędne' not in counts:
+            counts['Błędne'] = 0
+        if 'Poprawne' not in counts:
+            counts['Poprawne'] = 0
+
+        counts.plot(kind='bar', stacked=True, color={'Poprawne': 'green', 'Błędne': 'red'}, ax=ax)
+
+        ax.set_title(f'Poprawność predykcji populacji wg wieku - Populacja {pop}')
+        ax.set_xlabel('Wiek biologiczny (Wiek)')
+        ax.set_ylabel('Liczba przypadków')
+        ax.tick_params(axis='x', rotation=45)
+        ax.legend(title='Typ predykcji')
+
+    fig.suptitle('Poprawność predykcji populacji wg wieku', fontsize=16)
+    return fig
 
 
 def main():
@@ -260,28 +341,31 @@ def main():
 
         # Generowanie wizualizacji
         print("\nGenerowanie wizualizacji...")
-        cm_fig = plot_population_confusion_matrix(df_filtered)
-        prob_dist_fig = plot_probability_distribution(df_filtered)
+        summary_fig = create_prediction_summary_page(df_filtered, log_dir)
+        cm_fig = plot_population_confusion_matrices(df_filtered)
         age_scatter_fig = plot_age_scatter(df_filtered)
         prob_by_age_fig = plot_probability_by_age_class(df_filtered)
-        age_cm_figs = plot_age_confusion_matrices_per_population(df_filtered)
+        age_cm_fig = plot_age_confusion_matrices_per_population(df_filtered)
+        correctness_fig = plot_correctness_by_age_stacked_bar(df_filtered)
         print("Wizualizacje wygenerowane.")
 
         # Zapis do pliku PDF
         pdf_path = log_dir / "prediction_analysis_report.pdf"
         print(f"\n🚀 Generowanie raportu PDF: {pdf_path}")
         with PdfPages(pdf_path) as pdf:
+            # Zapis z DPI=150 w celu optymalizacji rozmiaru pliku
+            if summary_fig:
+                pdf.savefig(summary_fig)
             if cm_fig:
-                pdf.savefig(cm_fig)
-            if prob_dist_fig:
-                pdf.savefig(prob_dist_fig)
+                pdf.savefig(cm_fig, dpi=150)
             if age_scatter_fig:
-                pdf.savefig(age_scatter_fig)
+                pdf.savefig(age_scatter_fig, dpi=150)
             if prob_by_age_fig:
-                pdf.savefig(prob_by_age_fig)
-            if age_cm_figs:
-                for fig in age_cm_figs:
-                    pdf.savefig(fig)
+                pdf.savefig(prob_by_age_fig, dpi=150)
+            if age_cm_fig:
+                pdf.savefig(age_cm_fig, dpi=150)
+            if correctness_fig:
+                pdf.savefig(correctness_fig, dpi=150)
 
         print(f"📄 Raport został pomyślnie zapisany.")
         plt.show()
