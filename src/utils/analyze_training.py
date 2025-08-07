@@ -67,7 +67,7 @@ def load_data(log_dir: Path):
     # --- Wczytywanie metryk treningowych ---
     metrics_files = glob.glob(str(log_dir / "*training_metrics.csv"))
     if not metrics_files:
-        print(f"  - ⚠️ Nie znaleziono pliku metryk (*training_metrics.csv). Wykresy metryk nie będą dostępne.")
+        print(f"  - ⚠️ Nie znaleziono pliku metryk (*_training_metrics.csv). Wykresy metryk nie będą dostępne.")
     else:
         try:
             metrics_path = Path(metrics_files[0])
@@ -100,7 +100,22 @@ def load_data(log_dir: Path):
     else:
         print("  - ⚠️ Nie znaleziono pliku podsumowania augmentacji (augmentation_summary_*.csv).")
 
-    return metrics_df, confusion_matrix, cm_labels, augment_df
+    # --- Wczytywanie parametrów przebiegu ---
+    params_path = log_dir / "params.yaml"
+    params = None
+    if params_path.exists():
+        try:
+            from omegaconf import OmegaConf
+            print(f"  - Znaleziono plik parametrów: {params_path.name}")
+            params = OmegaConf.load(params_path)
+        except Exception as e:
+            print(f"  - ❌ Błąd podczas wczytywania pliku parametrów: {e}")
+            params = None
+    else:
+        print("  - ⚠️ Nie znaleziono pliku params.yaml.")
+
+
+    return metrics_df, confusion_matrix, cm_labels, augment_df, params
 
 def plot_metrics(metrics_df: pd.DataFrame):
     """
@@ -155,9 +170,9 @@ def plot_metrics(metrics_df: pd.DataFrame):
     return fig
 
 
-def plot_composite_score(metrics_df: pd.DataFrame):
+def plot_composite_score(metrics_df: pd.DataFrame, params: dict = None):
     """
-    Generuje dedykowany wykres dla Val Composite Score.
+    Generuje dedykowany wykres dla Val Composite Score oraz dodatkowych metryk walidacyjnych.
     """
     if metrics_df is None or 'Val Composite Score' not in metrics_df.columns or metrics_df['Val Composite Score'].isna().all():
         return None
@@ -165,27 +180,112 @@ def plot_composite_score(metrics_df: pd.DataFrame):
     df = metrics_df.copy()
     df['epoch_num'] = df['Epoch'].str.extract(r'e(\d+)').astype(int)
 
-    fig, ax = plt.subplots(figsize=(10, 6), constrained_layout=True)
-    ax.plot(df['epoch_num'], df['Val Composite Score'], 'o-', label='Validation', color='purple')
-    ax.set_title('Validation Composite Score Over Epochs')
-    ax.set_ylabel('Composite Score')
-    ax.set_xlabel('Epoch')
-    ax.legend()
-    ax.grid(True)
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    ax2 = ax1.twinx()  # dla MAE Age
 
-    # Znajdź i oznacz najlepszy wynik
-    best_epoch_idx = df['Val Composite Score'].idxmax()
-    best_score = df['Val Composite Score'].max()
-    best_epoch_num = df['epoch_num'][best_epoch_idx]
-    ax.annotate(f'Best: {best_score:.4f}',
-                xy=(best_epoch_num, best_score),
-                xytext=(best_epoch_num, best_score * 0.9),
-                arrowprops=dict(facecolor='black', shrink=0.05),
-                horizontalalignment='center')
+    # 🔧 TRZECIA oś Y tylko dla Composite Score
+    ax3 = ax1.twinx()
+    ax3.spines["right"].set_position(("axes", 1.12))
+    ax3.set_frame_on(True)
+    ax3.patch.set_visible(False)
 
+    # Composite Score z dokładnym zakresem
+    if 'Val Composite Score' in df.columns:
+        ax3.plot(df['epoch_num'], df['Val Composite Score'], 'o-', label='Composite Score', color='purple')
+        ax3.set_ylabel('Composite Score', color='purple')
+        ax3.tick_params(axis='y', labelcolor='purple')
+        margin = 0.001
+        min_y = df['Val Composite Score'].min() - margin
+        max_y = df['Val Composite Score'].max() + margin * 3  # 🔧 więcej miejsca nad linią
+        ax3.set_ylim(min_y, max_y)
 
-    fig.suptitle("Dedykowany wykres: Val Composite Score", fontsize=16)
+    # F1 Score globalny
+    if 'Val F1' in df.columns:
+        ax1.plot(df['epoch_num'], df['Val F1'], 's--', label='F1 Score ( α )', color='green')
+    # F1 Pop2 Age3-6
+    if 'Val F1 Pop2 Age3-6' in df.columns:
+        ax1.plot(df['epoch_num'], df['Val F1 Pop2 Age3-6'], 'd-.', label='F1 Pop2 Age3-6 ( β )', color='orange')
+    # MAE
+    if 'Val MAE Age' in df.columns:
+        ax2.plot(df['epoch_num'], df['Val MAE Age'], 'x-', label='MAE Age ( γ )', color='red')
+        ax2.set_ylabel('MAE Age', color='red')
+        ax2.tick_params(axis='y', labelcolor='red')
+
+    # 🔧 Usunięcie podtytułu
+    ax1.set_title('Validation Composite Score Over Epochs')
+
+    ax1.set_ylabel('Score / F1')
+    ax1.set_xlabel('Epoch')
+    ax1.grid(True)
+
+    # 🔧 LEGENDY
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    lines3, labels3 = ax3.get_legend_handles_labels()
+    ax1.legend(
+        lines1 + lines2 + lines3,
+        labels1 + labels2 + labels3,
+        loc='center right',
+        frameon=False
+    )
+
+    # 🔧 ADNOTACJE "Best" dla każdej metryki
+
+    # Composite Score (ax3)
+    if 'Val Composite Score' in df.columns:
+        idx = df['Val Composite Score'].idxmax()
+        score = df['Val Composite Score'].max()
+        epoch = df['epoch_num'][idx]
+        ax3.annotate(f'Best: {score:.4f}',
+                     xy=(epoch, score),
+                     xytext=(epoch, score + margin * 2),
+                     arrowprops=dict(facecolor='purple', arrowstyle='->'),
+                     horizontalalignment='center',
+                     color='purple')
+
+    # F1 Score (ax1)
+    if 'Val F1' in df.columns:
+        idx = df['Val F1'].idxmax()
+        score = df['Val F1'].max()
+        epoch = df['epoch_num'][idx]
+        ax1.annotate(f'Best: {score:.4f}',
+                     xy=(epoch, score),
+                     xytext=(epoch, score - 0.05),  # 🔽 poniżej punktu
+                     arrowprops=dict(facecolor='green', arrowstyle='->'),
+                     horizontalalignment='center',
+                     verticalalignment='top',  # 🔧 nowość!
+                     color='green')
+
+    # F1 Pop2 Age3-6 (ax1)
+    if 'Val F1 Pop2 Age3-6' in df.columns:
+        idx = df['Val F1 Pop2 Age3-6'].idxmax()
+        score = df['Val F1 Pop2 Age3-6'].max()
+        epoch = df['epoch_num'][idx]
+        ax1.annotate(f'Best: {score:.4f}',
+                     xy=(epoch, score),
+                     xytext=(epoch, score + 0.02),
+                     arrowprops=dict(facecolor='orange', arrowstyle='->'),
+                     horizontalalignment='center',
+                     color='orange')
+
+    # MAE Age (ax2) — tu szukamy MIN, nie MAX
+    if 'Val MAE Age' in df.columns:
+        idx = df['Val MAE Age'].idxmin()
+        score = df['Val MAE Age'].min()
+        epoch = df['epoch_num'][idx]
+        ax2.annotate(f'Best: {score:.4f}',
+                     xy=(epoch, score),
+                     xytext=(epoch, score + 0.05),
+                     arrowprops=dict(facecolor='red', arrowstyle='->'),
+                     horizontalalignment='center',
+                     color='red')
+
+    # 🔧 Dodatkowy margines
+    fig.subplots_adjust(top=0.88)
+    fig.tight_layout(rect=[0, 0, 0.85, 1])
     return fig
+
+
 
 
 def plot_confusion_matrix(cm, labels):
@@ -340,7 +440,7 @@ def main():
         return
 
     try:
-        metrics_df, confusion_matrix, cm_labels, augment_df = load_data(log_dir)
+        metrics_df, confusion_matrix, cm_labels, augment_df, params = load_data(log_dir)
 
         if metrics_df is not None:
              print("\n✅ Pomyślnie wczytano dane metryk. Ostatnie 3 wiersze:")
@@ -350,7 +450,7 @@ def main():
         summary_fig = create_summary_page(metrics_df, log_dir)
 
         # Generuj wizualizacje tylko jeśli dane są dostępne
-        composite_score_fig = plot_composite_score(metrics_df)
+        composite_score_fig = plot_composite_score(metrics_df, params)
         metrics_fig = plot_metrics(metrics_df)
         cm_fig = plot_confusion_matrix(confusion_matrix, cm_labels)
         augment_fig = plot_augmentation_summary(augment_df)
