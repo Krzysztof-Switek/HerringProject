@@ -22,20 +22,35 @@ from matplotlib.backends.backend_pdf import PdfPages
 import glob
 
 
+# ===================================================================
+# 🔧 USTAWIENIA UŻYTKOWNIKA
+# Podaj domyślną ścieżkę do katalogu z logami, który chcesz analizować.
+# Ta ścieżka zostanie użyta, jeśli skrypt zostanie uruchomiony bez
+# podawania argumentu w wierszu poleceń.
+DEFAULT_LOG_DIR = "results/logs/BEST_resnet50_standard_ce_multi_2025-07-19_19-24"
+# ===================================================================
+
+
 def parse_arguments():
     """Parsuje argumenty wiersza poleceń."""
     parser = argparse.ArgumentParser(
         description="Analizuje i wizualizuje wyniki treningu z podanego katalogu logów.",
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="""
-Przykład użycia:
-  python src/utils/analyze_training.py results/logs/resnet50_standard_ce_multi_2023-05-30_10-00
+Przykłady użycia:
+  1. Użycie domyślnej ścieżki z pliku:
+     python src/utils/analyze_training.py
+
+  2. Podanie konkretnej ścieżki:
+     python src/utils/analyze_training.py results/logs/resnet50_standard_ce_multi_2023-05-30_10-00
 """
     )
     parser.add_argument(
         "log_dir",
         type=str,
-        help="Ścieżka do katalogu z logami treningowymi, który ma być przeanalizowany."
+        nargs='?',  # Argument jest opcjonalny
+        default=None,  # Domyślna wartość, jeśli nie podano
+        help="Opcjonalna ścieżka do katalogu z logami. Jeśli nie podano, użyta zostanie domyślna z pliku."
     )
     return parser.parse_args()
 
@@ -215,10 +230,20 @@ def plot_augmentation_summary(augment_df: pd.DataFrame):
 def main():
     """Główna funkcja skryptu."""
     args = parse_arguments()
-    log_dir = Path(args.log_dir)
+
+    # Użyj ścieżki z argumentu wiersza poleceń, jeśli została podana.
+    # W przeciwnym razie użyj domyślnej ścieżki z góry pliku.
+    if args.log_dir:
+        log_dir = Path(args.log_dir)
+        print(f"ℹ️ Używam ścieżki z wiersza poleceń: {log_dir}")
+    else:
+        log_dir = Path(DEFAULT_LOG_DIR)
+        print(f"ℹ️ Używam domyślnej ścieżki z pliku: {log_dir}")
+
 
     if not log_dir.is_dir():
         print(f"Błąd: Podana ścieżka '{log_dir}' nie jest prawidłowym katalogiem.")
+        print("Upewnij się, że ścieżka jest poprawna w sekcji USTAWIENIA UŻYTKOWNIKA lub podana jako argument.")
         return
 
     try:
