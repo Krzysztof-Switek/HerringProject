@@ -53,7 +53,8 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager,
     # Użyj cfg (załadowanego z params.yaml lub fallback) do określenia image_size
     image_size_to_use = cfg.multitask_model.backbone_model.image_size if is_multitask else cfg.base_model.image_size
     transform = transforms.Compose([
-        transforms.Resize(image_size_to_use),  # Użyj poprawnego image_size
+        transforms.Resize(image_size_to_use),
+        transforms.CenterCrop(image_size_to_use),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])

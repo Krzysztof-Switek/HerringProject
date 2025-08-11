@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from torchvision import transforms
 from models.model import HerringModel
 from omegaconf import OmegaConf
-import os
 
 def run_full_dataset_prediction():
     # Wczytanie konfiguracji
@@ -27,9 +26,16 @@ def run_full_dataset_prediction():
         model.load_state_dict(checkpoint)
     model.eval()
 
-    # Transformacja
+    # Ustalanie rozmiaru obrazu na podstawie konfiguracji (logika zunifikowana z dataset.py)
+    if cfg.get("multitask_model") and cfg.multitask_model.use:
+        image_size = cfg.multitask_model.backbone_model.image_size
+    else:
+        image_size = cfg.base_model.image_size
+
+    # Transformacja - zunifikowana z potokiem walidacyjnym
     transform = transforms.Compose([
-        transforms.Resize(cfg.data.image_size),
+        transforms.Resize(image_size),
+        transforms.CenterCrop(image_size),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
