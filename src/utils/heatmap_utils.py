@@ -3,6 +3,20 @@ import numpy as np
 import cv2
 from abc import ABC, abstractmethod
 
+def _extract_logits(output):
+    """
+    Zwraca tensor logitów klasyfikacyjnych o kształcie [N, C].
+    - Jeśli model zwraca (logits, coś) -> weź logits.
+    - Jeśli dostajemy [C] -> zrób [1, C].
+    """
+    if isinstance(output, (tuple, list)):
+        output = output[0]
+    if not torch.is_tensor(output):
+        raise TypeError(f"Model forward must return a Tensor or (Tensor, ...), got: {type(output)}")
+    if output.ndim == 1:
+        output = output.unsqueeze(0)
+    return output
+
 
 class BaseHeatmapGenerator(ABC):
     """Abstrakcyjna klasa bazowa dla metod generujących heatmapy."""
@@ -87,21 +101,23 @@ class GradCAM(BaseHeatmapGenerator):
         if not self.verify_hooks():
             raise RuntimeError("Hooks are not active")
 
-        output = self.model(input_tensor)
+        # forward -> logits [N, C]
+        output_raw = self.model(input_tensor)
+        output = _extract_logits(output_raw)
 
-        if class_idx >= output.shape[1]:
-            raise ValueError(f"Invalid class index: {class_idx}")
+        if class_idx < 0 or class_idx >= output.shape[1]:
+            raise ValueError(f"Invalid class index: {class_idx} for output shape {tuple(output.shape)}")
 
         self.model.zero_grad()
         one_hot = torch.zeros_like(output)
         one_hot[0, class_idx] = 1
         output.backward(gradient=one_hot, retain_graph=True)
 
+        # weights: [C,1,1] po średniej po H,W; activations: [N,C,H,W] (hook)
         weights = torch.mean(self.gradients, dim=(2, 3), keepdim=True)
-        cam = torch.sum(weights * self.activations, dim=1, keepdim=True)
-        cam = torch.relu(cam.squeeze()).cpu().numpy()
+        cam = torch.sum(weights * self.activations, dim=1, keepdim=True)  # [N,1,H,W]
+        cam = torch.relu(cam.squeeze()).cpu().numpy()  # [H,W]
         cam = cv2.normalize(cam, None, 0, 1, cv2.NORM_MINMAX)
-
         return cam
 
     def __del__(self):
@@ -182,24 +198,25 @@ class GradCAMPP(GradCAM):
         if not self.verify_hooks():
             raise RuntimeError("Hooks are not active")
 
-        output = self.model(input_tensor)
+        output_raw = self.model(input_tensor)
+        output = _extract_logits(output_raw)
 
-        if class_idx >= output.shape[1]:
-            raise ValueError(f"Invalid class index: {class_idx}")
+        if class_idx < 0 or class_idx >= output.shape[1]:
+            raise ValueError(f"Invalid class index: {class_idx} for output shape {tuple(output.shape)}")
 
         self.model.zero_grad()
         one_hot = torch.zeros_like(output)
         one_hot[0, class_idx] = 1
         output.backward(gradient=one_hot, retain_graph=True)
 
-        grads = self.gradients[0].cpu().numpy()
-        acts = self.activations[0].cpu().numpy()
+        grads = self.gradients[0].cpu().numpy()  # [C,H,W]
+        acts = self.activations[0].cpu().numpy()  # [C,H,W]
 
-        weights = np.mean(np.maximum(grads, 0) ** 2, axis=(1, 2), keepdims=True)
-        cam = np.sum(acts * weights, axis=0)
+        # klasyczny wariant wag dla CAM++
+        weights = np.mean(np.maximum(grads, 0.0) ** 2, axis=(1, 2), keepdims=True)  # [C,1,1]
+        cam = np.sum(acts * weights, axis=0)  # [H,W]
         cam = np.maximum(cam, 0)
         cam = cv2.normalize(cam, None, 0, 1, cv2.NORM_MINMAX)
-
         return cam
 
 
@@ -254,31 +271,27 @@ class GuidedBackprop(BaseHeatmapGenerator):
         if not self.verify_hooks():
             raise RuntimeError("Not all hooks are active")
 
-        input_tensor = input_tensor.clone().requires_grad_(True)
-        output = self.model(input_tensor)
+        x = input_tensor.clone().requires_grad_(True)
+        output_raw = self.model(x)
+        output = _extract_logits(output_raw)  # [N,C]
 
-        if class_idx >= output.shape[1]:
-            raise ValueError(f"Invalid class index: {class_idx}")
+        if class_idx < 0 or class_idx >= output.shape[1]:
+            raise ValueError(f"Invalid class index: {class_idx} for output shape {tuple(output.shape)}")
 
         self.model.zero_grad()
         one_hot = torch.zeros_like(output)
         one_hot[0, class_idx] = 1
         output.backward(gradient=one_hot)
 
-        if input_tensor.grad is None:
+        if x.grad is None:
             raise RuntimeError("No gradients - hooks failed")
 
-        saliency = input_tensor.grad[0].cpu().numpy()
-        saliency = np.max(np.abs(saliency), axis=0)
-
-        # Normalizacja saliency do zakresu [0, 1]
+        saliency = x.grad[0].cpu().numpy()  # [3,H,W]
+        saliency = np.max(np.abs(saliency), axis=0)  # [H,W]
         saliency = cv2.normalize(saliency, None, 0, 1, cv2.NORM_MINMAX)
-        saliency = np.clip(saliency, 0, 1)  # Upewnienie się, że wartości są w zakresie [0, 1]
-
-        # Zastosowanie logarytmicznej normalizacji (tylko dla kontrastu)
-        saliency = np.log1p(saliency)  # Logarytmiczne uwydatnienie różnic
-        saliency = saliency / np.max(saliency)
-
+        saliency = np.clip(saliency, 0, 1)
+        saliency = np.log1p(saliency)
+        saliency = saliency / (np.max(saliency) + 1e-12)
         return saliency
 
     def __del__(self):

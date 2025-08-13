@@ -29,33 +29,93 @@ if MANUAL_RUN:
 #                         KONIEC SEKCJI
 # ================================================================
 
-def generate_heatmaps_for_report(df_results, model, cfg, log_dir, transform, n_cases=3):
+def _resolve_local_image_path(row, data_root: Path) -> Optional[Path]:
     """
-    Selects interesting cases and generates heatmaps for them.
+    Zwróć istniejącą ścieżkę do obrazu.
+    1) Próbuj FilePath z DataFrame.
+    2) Jeśli nie istnieje – szukaj po FileName w data_root (train/val/test/**).
+    """
+    # 1) spróbuj FilePath
+    fp = row.get("FilePath", None)
+    if isinstance(fp, str) and fp.strip():
+        p = Path(fp)
+        if p.exists():
+            return p
+
+    # 2) szukaj po FileName (case-insensitive) oraz rozszerzeniach
+    fname = str(row.get("FileName", "")).strip()
+    if not fname:
+        return None
+
+    candidates = []
+    # dopasowanie bez uwzględniania wielkości liter + popularne rozszerzenia
+    stem = Path(fname).stem
+    exts = [".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"]
+    # przeszukaj train/val/test (płytko i rekurencyjnie)
+    for split in ["train", "val", "test"]:
+        base = data_root / split
+        if not base.exists():
+            continue
+        # szukaj po nazwie bez rozszerzenia
+        for ext in exts:
+            for p in base.rglob(stem + ext):
+                if p.name.lower() == (stem + ext).lower():
+                    candidates.append(p)
+    # wybierz pierwszy sensowny kandydat
+    return candidates[0] if candidates else None
+
+
+def generate_heatmaps_for_report(
+    df_results: pd.DataFrame,
+    model,
+    cfg,
+    log_dir: Path,
+    transform,
+    loss_name: str,
+    data_root: Path,
+    n_cases: int = 3
+):
+    """
+    Generuje heatmapy dla trzech kategorii przypadków na podstawie *konkretnych*
+    kolumn z bieżącego loss_name. Unika kolumn *_age_pred.
     """
     print("\n🔥 Generowanie heatmap dla raportu...")
 
-    heatmap_dir = log_dir / "heatmaps"
-    heatmap_dir.mkdir(exist_ok=True)
+    # --- 1) Wybór właściwych kolumn dokładnie po loss_name ---
+    pred_col = f"{loss_name}_pred"
+    prob_col = f"{loss_name}_prob"
 
-    pred_col = next((col for col in reversed(df_results.columns) if col.endswith('_pred')), None)
-    prob_col = next((col for col in reversed(df_results.columns) if col.endswith('_probability')), None)
+    if pred_col not in df_results.columns or prob_col not in df_results.columns:
+        # awaryjnie: spróbuj odfiltrować kolumny *_pred bez *_age_pred i wziąć najnowszą
+        pred_candidates = [c for c in df_results.columns if c.endswith("_pred") and not c.endswith("_age_pred")]
+        prob_candidates = [c for c in df_results.columns if c.endswith("_prob")]
+        if not pred_candidates or not prob_candidates:
+            print("⚠️ Nie znaleziono kolumn predykcji/prawdopodobieństwa dla heatmap. Pomijam generowanie.")
+            return
+        # weź ostatnie (najbardziej „najnowsze” w df)
+        pred_col = pred_candidates[-1]
+        prob_col = prob_candidates[-1]
+        print(f"ℹ️ Uwaga: używam kolumn: pred={pred_col}, prob={prob_col}")
 
-    if not pred_col or not prob_col:
-        print("⚠️ Nie znaleziono kolumn predykcji/prawdopodobieństwa. Pomijanie generowania heatmap.")
-        return
+    # --- 2) Przygotowanie danych ---
+    for col in [prob_col, pred_col, "Populacja"]:
+        df_results[col] = pd.to_numeric(df_results[col], errors='coerce')
 
-    df_results[prob_col] = pd.to_numeric(df_results[prob_col], errors='coerce')
-    df_results[pred_col] = pd.to_numeric(df_results[pred_col], errors='coerce')
-    df_results['Populacja'] = pd.to_numeric(df_results['Populacja'], errors='coerce')
-    df_results = df_results.dropna(subset=[prob_col, pred_col, 'Populacja', 'FilePath'])
+    # zachowaj tylko rekordy z kompletnymi danymi oraz istniejącym FileName
+    base_subset = [prob_col, pred_col, "Populacja", "FileName"]
+    keep_cols = [c for c in base_subset if c in df_results.columns]
+    df_results = df_results.dropna(subset=keep_cols)
 
+    # --- 3) Selekcja przypadków ---
     correct = df_results[df_results["Populacja"] == df_results[pred_col]]
     incorrect = df_results[df_results["Populacja"] != df_results[pred_col]]
 
     best_correct = correct.sort_values(by=prob_col, ascending=False).head(n_cases)
     worst_correct = correct.sort_values(by=prob_col, ascending=True).head(n_cases)
     confident_incorrect = incorrect.sort_values(by=prob_col, ascending=False).head(n_cases)
+
+    print(f"   ✓ Znaleziono: best_correct={len(best_correct)}, worst_correct={len(worst_correct)}, "
+          f"conf_incorrect={len(confident_incorrect)}")
 
     cases_to_plot = {
         "best_correct": best_correct,
@@ -66,6 +126,10 @@ def generate_heatmaps_for_report(df_results, model, cfg, log_dir, transform, n_c
     target_layer = cfg.visualization.target_layer
     device = next(model.parameters()).device
 
+    heatmap_dir = log_dir / "heatmaps"
+    heatmap_dir.mkdir(exist_ok=True)
+
+    # --- 4) Generowanie heatmap ---
     for category, df_cases in cases_to_plot.items():
         if df_cases.empty:
             print(f"INFO: Brak przypadków w kategorii '{category}'.")
@@ -77,7 +141,12 @@ def generate_heatmaps_for_report(df_results, model, cfg, log_dir, transform, n_c
 
         for _, row in df_cases.iterrows():
             try:
-                img_path = Path(row["FilePath"])
+                img_path = _resolve_local_image_path(row, data_root)
+                if img_path is None or not img_path.exists():
+                    print(f"    ❌ Nie znaleziono pliku lokalnie dla FileName='{row.get('FileName','')}'. "
+                          f"Pominięto.")
+                    continue
+
                 original_image = Image.open(img_path).convert("RGB")
                 image_tensor = transform(original_image).unsqueeze(0).to(device)
 
@@ -96,9 +165,10 @@ def generate_heatmaps_for_report(df_results, model, cfg, log_dir, transform, n_c
                     cfg_visualization=cfg.visualization
                 )
             except Exception as e:
-                print(f"    ❌ Błąd podczas generowania heatmapy dla {img_path.name}: {e}")
+                print(f"    ❌ Błąd podczas generowania heatmapy: {e}")
 
     print("✅ Zakończono generowanie heatmap.")
+
 
 
 def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager,
@@ -191,8 +261,16 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager,
     print(f"✅ Zapisano predykcje ({loss_name}) do: {output_path}")
 
     if cfg.visualization.get('generate_heatmaps_in_report', False):
-        generate_heatmaps_for_report(df, model, cfg, log_dir, transform,
-                                     n_cases=cfg.visualization.get('n_heatmap_cases', 3))
+        generate_heatmaps_for_report(
+            df_results=df,
+            model=model,
+            cfg=cfg,
+            log_dir=log_dir,
+            transform=transform,
+            loss_name=loss_name,  # <— kluczowe: precyzyjny wybór kolumn
+            data_root=path_manager.data_root(),  # <— do lokalnego wyszukania obrazów
+            n_cases=cfg.visualization.get('n_heatmap_cases', 3)
+        )
 
     print("⏭️ Przechodzę do kolejnej funkcji straty...\n")
 

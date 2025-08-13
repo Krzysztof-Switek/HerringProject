@@ -107,7 +107,7 @@ visualization:
   display_mode: 'matrix'
   matrix_cols: 3
   save_individual: False
-  target_layer: "base.features.8.0"           #resnet50:"base.layer4.2.conv3"; efficientnet:"base.features.8.0"
+  target_layer: "base.layer4.2.conv3"           #resnet50:"base.layer4.2.conv3"; efficientnet:"base.features.8.0"
   colormap: "jet"
   alpha: 0.5
   generate_heatmaps_in_report: true
