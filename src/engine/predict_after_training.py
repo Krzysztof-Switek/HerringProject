@@ -14,12 +14,12 @@ from utils.heatmap_utils import create_heatmap_plot
 # ================================================================
 #                USTAWIENIA DO URUCHOMIENIA RĘCZNEGO
 # ================================================================
-MANUAL_RUN = False
+MANUAL_RUN = True
 
 if MANUAL_RUN:
     MANUAL_SETTINGS = {
-        "model_path": "checkpoints/nazwa_modelu/model.pth",
-        "output_dir": "results/manual_prediction_output",
+        "model_path": "C:/Users/kswitek/Documents/HerringProject/checkpoints/BEST_resnet50_standard_ce_multi_2025-07-19_19-24/resnet50_standard_ce_SCORE_0.910.pth",
+        "output_dir": "C:/Users/kswitek/Documents/HerringProject/results/logs/BEST_resnet50_standard_ce_multi_2025-07-19_19-24",
         "config_path": "src/config/config.yaml",
         "limit": None
     }
