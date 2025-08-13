@@ -21,8 +21,8 @@ MANUAL_RUN = False  # ZMIEŃ NA True, ABY URUCHOMIĆ RĘCZNIE
 
 if MANUAL_RUN:
     MANUAL_SETTINGS = {
-        "model_path": "checkpoints/nazwa_modelu/model.pth",
-        "output_dir": "results/manual_prediction_output",
+        "model_path": "checkpoints/BEST_resnet50_standard_ce_multi_2025-07-19_19-24/resnet50_standard_ce_SCORE_0.910.pth",
+        "output_dir": "results/logs/BEST_resnet50_standard_ce_multi_2025-07-19_19-24",
         "config_path": "src/config/config.yaml",  # Zazwyczaj nie trzeba zmieniać
         "limit": None  # Ustaw liczbę, np. 50, aby ograniczyć predykcje do testów
     }
