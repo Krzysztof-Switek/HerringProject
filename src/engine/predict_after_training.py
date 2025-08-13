@@ -9,22 +9,19 @@ from utils.population_mapper import PopulationMapper
 from omegaconf import OmegaConf
 from pathlib import Path
 from typing import Optional
+from utils.heatmap_utils import create_heatmap_plot
 
 # ================================================================
 #                USTAWIENIA DO URUCHOMIENIA RĘCZNEGO
 # ================================================================
-# Ustaw MANUAL_RUN на True, aby uruchomić predykcję z poniższymi ustawieniami.
-# Jeśli MANUAL_RUN jest False, ten blok jest ignorowany, a skrypt można
-# importować i używać w pipeline treningowym.
-
-MANUAL_RUN = True  # ZMIEŃ NA True, ABY URUCHOMIĆ RĘCZNIE
+MANUAL_RUN = False
 
 if MANUAL_RUN:
     MANUAL_SETTINGS = {
-        "model_path": "C:/Users/kswitek/Documents/HerringProject/checkpoints/BEST_resnet50_standard_ce_multi_2025-07-19_19-24/resnet50_standard_ce_SCORE_0.910.pth",
-        "output_dir": "C:/Users/kswitek/Documents/HerringProject/results/logs/BEST_resnet50_standard_ce_multi_2025-07-19_19-24",
-        "config_path": "src/config/config.yaml",  # Zazwyczaj nie trzeba zmieniać
-        "limit": None  # Ustaw liczbę, np. 50, aby ograniczyć predykcje do testów
+        "model_path": "checkpoints/nazwa_modelu/model.pth",
+        "output_dir": "results/manual_prediction_output",
+        "config_path": "src/config/config.yaml",
+        "limit": None
     }
 
 
@@ -32,23 +29,81 @@ if MANUAL_RUN:
 #                         KONIEC SEKCJI
 # ================================================================
 
+def generate_heatmaps_for_report(df_results, model, cfg, log_dir, transform, n_cases=3):
+    """
+    Selects interesting cases and generates heatmaps for them.
+    """
+    print("\n🔥 Generowanie heatmap dla raportu...")
+
+    heatmap_dir = log_dir / "heatmaps"
+    heatmap_dir.mkdir(exist_ok=True)
+
+    pred_col = next((col for col in reversed(df_results.columns) if col.endswith('_pred')), None)
+    prob_col = next((col for col in reversed(df_results.columns) if col.endswith('_probability')), None)
+
+    if not pred_col or not prob_col:
+        print("⚠️ Nie znaleziono kolumn predykcji/prawdopodobieństwa. Pomijanie generowania heatmap.")
+        return
+
+    df_results[prob_col] = pd.to_numeric(df_results[prob_col], errors='coerce')
+    df_results[pred_col] = pd.to_numeric(df_results[pred_col], errors='coerce')
+    df_results['Populacja'] = pd.to_numeric(df_results['Populacja'], errors='coerce')
+    df_results = df_results.dropna(subset=[prob_col, pred_col, 'Populacja', 'FilePath'])
+
+    correct = df_results[df_results["Populacja"] == df_results[pred_col]]
+    incorrect = df_results[df_results["Populacja"] != df_results[pred_col]]
+
+    best_correct = correct.sort_values(by=prob_col, ascending=False).head(n_cases)
+    worst_correct = correct.sort_values(by=prob_col, ascending=True).head(n_cases)
+    confident_incorrect = incorrect.sort_values(by=prob_col, ascending=False).head(n_cases)
+
+    cases_to_plot = {
+        "best_correct": best_correct,
+        "worst_correct": worst_correct,
+        "confident_incorrect": confident_incorrect
+    }
+
+    target_layer = cfg.visualization.target_layer
+    device = next(model.parameters()).device
+
+    for category, df_cases in cases_to_plot.items():
+        if df_cases.empty:
+            print(f"INFO: Brak przypadków w kategorii '{category}'.")
+            continue
+
+        print(f"   -> Generowanie dla kategorii: {category}")
+        category_dir = heatmap_dir / category
+        category_dir.mkdir(exist_ok=True)
+
+        for _, row in df_cases.iterrows():
+            try:
+                img_path = Path(row["FilePath"])
+                original_image = Image.open(img_path).convert("RGB")
+                image_tensor = transform(original_image).unsqueeze(0).to(device)
+
+                output_filename = f"{img_path.stem}.png"
+                output_path = category_dir / output_filename
+
+                create_heatmap_plot(
+                    model=model,
+                    target_layer=target_layer,
+                    image_tensor=image_tensor,
+                    original_image=original_image,
+                    true_label=int(row["Populacja"]),
+                    pred_label=int(row[pred_col]),
+                    confidence=float(row[prob_col]),
+                    output_path=str(output_path),
+                    cfg_visualization=cfg.visualization
+                )
+            except Exception as e:
+                print(f"    ❌ Błąd podczas generowania heatmapy dla {img_path.name}: {e}")
+
+    print("✅ Zakończono generowanie heatmap.")
+
 
 def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager,
                                 log_dir, full_name: str, limit_predictions: Optional[int] = None):
-    import pandas as pd
-    from PIL import Image
-    import torch
-    import torch.nn.functional as F
-    from torchvision import transforms
-    from models.model import HerringModel
-    from models.multitask_model import MultiTaskHerringModel
-    from utils.population_mapper import PopulationMapper
-
-    if path_manager is None or path_manager.cfg is None:
-        raise ValueError("path_manager (wraz z konfiguracją cfg) jest wymagany do uruchomienia predykcji.")
-
     cfg = path_manager.cfg
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     population_mapper = PopulationMapper(cfg.data.active_populations)
 
@@ -67,8 +122,7 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager,
 
     image_size_to_use = cfg.multitask_model.backbone_model.image_size if is_multitask else cfg.base_model.image_size
     transform = transforms.Compose([
-        transforms.Resize(image_size_to_use),
-        transforms.CenterCrop(image_size_to_use),
+        transforms.Resize((image_size_to_use, image_size_to_use)),
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
@@ -82,39 +136,16 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager,
     folders = [f"train/{pop}" for pop in population_mapper.active_populations] + \
               [f"val/{pop}" for pop in population_mapper.active_populations] + \
               [f"test/{pop}" for pop in population_mapper.active_populations]
-    all_image_paths = []
-    for folder in folders:
-        folder_path = data_root / folder
-        if folder_path.exists():
-            all_image_paths.extend(folder_path.glob("*.jpg"))
-
+    all_image_paths = [p for folder in folders for p in (data_root / folder).glob("*.jpg") if
+                       (data_root / folder).exists()]
     all_image_paths.sort()
 
     if limit_predictions is not None and limit_predictions > 0:
-        if len(all_image_paths) > limit_predictions:
-            all_image_paths = all_image_paths[:limit_predictions]
-            print(f"⚠️ Predykcje zostaną ograniczone do {limit_predictions} obrazów (tryb debug/testowy).")
-        else:
-            print(
-                f"INFO: Żądano ograniczenia do {limit_predictions} obrazów, ale dostępnych jest tylko {len(all_image_paths)}. Użyte zostaną wszystkie dostępne.")
+        all_image_paths = all_image_paths[:limit_predictions]
 
     predictions = {}
-    total = len(all_image_paths)
-    if total == 0:
-        print(f"⚠️ Nie znaleziono obrazów do predykcji dla {loss_name}. Sprawdź ścieżki i konfigurację.")
-        df_empty = pd.DataFrame(columns=['FileName', f"{loss_name}_pred", f"{loss_name}_prob"] + (
-            [f"{loss_name}_age_pred"] if is_multitask else []))
-        output_path = log_dir / f"{full_name}_predictions.xlsx"
-        df_empty.to_excel(output_path, index=False)
-        print(f"✅ Zapisano pusty plik predykcji ({loss_name}) do: {output_path}")
-        return
-
-    print(f"\n🔍 Start predykcji ({loss_name}) na {total} obrazach...")
-
     for i, image_path in enumerate(all_image_paths, 1):
         try:
-            if total <= 200 or i % 100 == 0 or i == total:
-                print(f"Przetworzono {i} z {total} obrazów...")
             image = Image.open(image_path).convert("RGB")
             input_tensor = transform(image).unsqueeze(0).to(device)
             with torch.no_grad():
@@ -140,13 +171,10 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager,
     pred_column = f"{loss_name}_pred"
     prob_column = f"{loss_name}_prob"
     age_column = f"{loss_name}_age_pred"
-    pred_classes, pred_probs, pred_ages, not_found = [], [], [], []
 
+    pred_classes, pred_probs, pred_ages = [], [], []
     for file_name in df["FileName"]:
-        key = str(file_name).lower()
-        pred = predictions.get(key, (None, None, None))
-        if pred[0] is None:
-            not_found.append(key)
+        pred = predictions.get(str(file_name).lower(), (None, None, None))
         pred_classes.append(pred[0])
         pred_probs.append(pred[1])
         pred_ages.append(pred[2])
@@ -157,40 +185,29 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager,
         df[age_column] = pred_ages
 
     output_path = log_dir / f"{full_name}_predictions.xlsx"
-    if output_path.exists():
-        existing_df = pd.read_excel(output_path)
-        for col in [pred_column, prob_column, age_column]:
-            if col in existing_df.columns:
-                existing_df = existing_df.drop(columns=[col], errors='ignore')
-        if is_multitask:
-            df = pd.concat([existing_df, df[[pred_column, prob_column, age_column]]], axis=1)
-        else:
-            df = pd.concat([existing_df, df[[pred_column, prob_column]]], axis=1)
-
     df.to_excel(output_path, index=False)
+
     print(f"\n📊 Liczba przetworzonych obrazów: {len(predictions)}")
     print(f"✅ Zapisano predykcje ({loss_name}) do: {output_path}")
+
+    if cfg.visualization.get('generate_heatmaps_in_report', False):
+        generate_heatmaps_for_report(df, model, cfg, log_dir, transform,
+                                     n_cases=cfg.visualization.get('n_heatmap_cases', 3))
+
     print("⏭️ Przechodzę do kolejnej funkcji straty...\n")
 
 
 if __name__ == '__main__':
     if MANUAL_RUN:
-        # Importy potrzebne tylko do uruchomienia ręcznego
         from utils.path_manager import PathManager
 
         print("🚀 Uruchamianie predykcji w trybie ręcznym (z ustawień w pliku)...")
-
         settings = MANUAL_SETTINGS
-        if not all(k in settings for k in ["model_path", "output_dir", "config_path"]):
-            raise ValueError("MANUAL_SETTINGS musi zawierać 'model_path', 'output_dir', i 'config_path'.")
 
-        # --- Setup ---
         project_root = Path(__file__).resolve().parent.parent.parent
         config_path = project_root / settings["config_path"]
-        if not config_path.is_file():
-            raise FileNotFoundError(f"Plik konfiguracyjny nie został znaleziony: {config_path}")
-
         cfg = OmegaConf.load(config_path)
+
         path_manager = PathManager(project_root, cfg)
         output_dir = Path(settings["output_dir"])
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -199,7 +216,6 @@ if __name__ == '__main__':
         loss_name = f"manual_{model_name}"
         full_name = f"manual_run_{model_name}"
 
-        # Uruchom główną funkcję predykcji
         run_full_dataset_prediction(
             loss_name=loss_name,
             model_path=settings["model_path"],
@@ -208,7 +224,6 @@ if __name__ == '__main__':
             full_name=full_name,
             limit_predictions=settings.get("limit")
         )
-
         print("✅ Predykcja w trybie ręcznym zakończona.")
     else:
         print("INFO: Aby uruchomić ten skrypt ręcznie, edytuj go i zmień flagę MANUAL_RUN на True.")

@@ -110,6 +110,8 @@ visualization:
   target_layer: "base.features.8.0"           #resnet50:"base.layer4.2.conv3"; efficientnet:"base.features.8.0"
   colormap: "jet"
   alpha: 0.5
+  generate_heatmaps_in_report: true
+  n_heatmap_cases: 3
 
 
 ######################### ALTERNATYWNE MODELE ###########################
