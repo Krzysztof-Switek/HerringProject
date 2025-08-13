@@ -17,12 +17,12 @@ from typing import Optional
 # Jeśli MANUAL_RUN jest False, ten blok jest ignorowany, a skrypt można
 # importować i używać w pipeline treningowym.
 
-MANUAL_RUN = False  # ZMIEŃ NA True, ABY URUCHOMIĆ RĘCZNIE
+MANUAL_RUN = True  # ZMIEŃ NA True, ABY URUCHOMIĆ RĘCZNIE
 
 if MANUAL_RUN:
     MANUAL_SETTINGS = {
-        "model_path": "checkpoints/BEST_resnet50_standard_ce_multi_2025-07-19_19-24/resnet50_standard_ce_SCORE_0.910.pth",
-        "output_dir": "results/logs/BEST_resnet50_standard_ce_multi_2025-07-19_19-24",
+        "model_path": "C:/Users/kswitek/Documents/HerringProject/checkpoints/BEST_resnet50_standard_ce_multi_2025-07-19_19-24/resnet50_standard_ce_SCORE_0.910.pth",
+        "output_dir": "C:/Users/kswitek/Documents/HerringProject/results/logs/BEST_resnet50_standard_ce_multi_2025-07-19_19-24",
         "config_path": "src/config/config.yaml",  # Zazwyczaj nie trzeba zmieniać
         "limit": None  # Ustaw liczbę, np. 50, aby ograniczyć predykcje do testów
     }
