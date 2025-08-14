@@ -3,7 +3,7 @@ import torch.nn as nn
 from torchvision import models
 from omegaconf import DictConfig
 import warnings
-from .model_config import MODEL_CONFIGS
+from models.model_config import MODEL_CONFIGS
 
 
 class HerringModel(nn.Module):
@@ -16,7 +16,7 @@ class HerringModel(nn.Module):
         self._print_model_info()
 
     def _init_base_model(self) -> nn.Module:
-        model_name = self.cfg.base_model
+        model_name = self.full_cfg.model_name
         if model_name not in MODEL_CONFIGS:
             available = list(MODEL_CONFIGS.keys())
             raise ValueError(f"Model {model_name} not configured. Choose from: {available}")
@@ -69,7 +69,7 @@ class HerringModel(nn.Module):
         total = sum(p.numel() for p in self.parameters())
         print("\n" + "=" * 50)
         print(f"Model initialized on device: {self.device}")
-        print(f"Architecture: {self.cfg.base_model}")
+        print(f"Architecture: {self.full_cfg.model_name}")
         print(f"Total parameters: {total:,}")
         print(f"Trainable parameters: {trainable:,}")
         print(f"Pretrained weights: {self.cfg.pretrained}")
@@ -86,7 +86,7 @@ class HerringModel(nn.Module):
 def build_model(cfg: DictConfig) -> nn.Module:
     """Builds the model based on the mode specified in the config."""
     if cfg.mode == "multitask":
-        from .multitask_model import MultiTaskHerringModel
+        from models.multitask_model import MultiTaskHerringModel
         return MultiTaskHerringModel(cfg)
     elif cfg.mode == "single":
         return HerringModel(cfg)
