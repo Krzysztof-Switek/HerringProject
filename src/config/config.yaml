@@ -1,6 +1,6 @@
 # Global settings
-mode: "single"  # "single" or "multitask"
-model_name: "resnet50" # Choose from: resnet50, convnext_large, vit_h_14, efficientnet_v2_l, regnet_y_32gf
+mode: "single"            # "single" or "multitask"
+model_name: "resnet50"    # Choose from: resnet50, convnext_large, vit_h_14, efficientnet_v2_l, regnet_y_32gf
 
 # Data settings
 data:
@@ -29,7 +29,7 @@ multitask_model:
     hidden_dim: 128
     dropout_rate: 0.3
   loss_weighting:
-    method: "uncertainty" # "static", "uncertainty", "gradnorm", "none"
+    method: "uncertainty"       # "static", "uncertainty", "gradnorm", "none"
     static:
       classification: 1.0
       age: 0.3
