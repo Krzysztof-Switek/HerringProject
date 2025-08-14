@@ -3,13 +3,13 @@ import torch.nn as nn
 from torchvision import models
 from omegaconf import DictConfig
 import warnings
-from .model_config import MODEL_CONFIGS
+from models.model_config import MODEL_CONFIGS
 
 class MultiTaskHerringModel(nn.Module):
     def __init__(self, config: DictConfig):
         super().__init__()
         self.full_cfg = config
-        self.cfg = config.multitask_model.backbone_model
+        self.cfg = config.base_model
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -32,7 +32,7 @@ class MultiTaskHerringModel(nn.Module):
         self._print_model_info()
 
     def _init_base_model(self):
-        model_name = self.cfg.model_name
+        model_name = self.full_cfg.model_name
         if model_name not in MODEL_CONFIGS:
             raise ValueError(f"Model {model_name} not supported")
 
@@ -81,7 +81,7 @@ class MultiTaskHerringModel(nn.Module):
         trainable_params = sum(p.numel() for p in self.parameters() if p.requires_grad)
         print("\n" + "=" * 50)
         print(f"[MultiTask Model] initialized on device: {self.device}")
-        print(f"Architecture: {self.cfg.model_name}")
+        print(f"Architecture: {self.full_cfg.model_name}")
         print(f"Total parameters: {total_params:,}")
         print(f"Trainable parameters: {trainable_params:,}")
         print(f"Pretrained weights: {self.cfg.pretrained}")

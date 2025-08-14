@@ -1,5 +1,5 @@
 # Global settings
-mode: "single"            # "single" or "multitask"
+mode: "multitask"            # "single" or "multitask"
 model_name: "resnet50"    # Choose from: resnet50, convnext_large, vit_h_14, efficientnet_v2_l, regnet_y_32gf
 
 # Data settings
