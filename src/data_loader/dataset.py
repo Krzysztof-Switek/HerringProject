@@ -128,9 +128,7 @@ class HerringDataset:
         return counter
 
     def _get_image_size(self):
-        if self.cfg.get("multitask_model") and self.cfg.multitask_model.use:
-            return self.cfg.multitask_model.backbone_model.image_size
-        return self.cfg.base_model.image_size
+        return self.cfg.image_size
 
     def _get_base_transforms(self):
         size = self._get_image_size()
