@@ -3,26 +3,25 @@ import torch.nn as nn
 from torchvision import models
 from omegaconf import DictConfig
 import warnings
+from .model_config import MODEL_CONFIGS
 
 class MultiTaskHerringModel(nn.Module):
     def __init__(self, config: DictConfig):
         super().__init__()
         self.full_cfg = config
-        self.cfg = config.multitask_model.backbone_model  # 🔧 Nowa ścieżka
+        self.cfg = config.multitask_model.backbone_model
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.base, num_features = self._init_base_model()
 
-        # Główny klasyfikator populacji
-        clf_cfg = config.multitask_model.classifier_head  # 🔧
+        clf_cfg = config.multitask_model.classifier_head
         self.classifier_head = nn.Sequential(
             nn.Dropout(p=clf_cfg.dropout_rate),
             nn.Linear(num_features, len(self.full_cfg.data.active_populations))
         )
 
-        # Głowa regresji wieku
-        reg_cfg = config.multitask_model.regression_head  # 🔧
+        reg_cfg = config.multitask_model.regression_head
         self.age_regression_head = nn.Sequential(
             nn.Linear(num_features, reg_cfg.hidden_dim),
             nn.ReLU(),
@@ -33,37 +32,28 @@ class MultiTaskHerringModel(nn.Module):
         self._print_model_info()
 
     def _init_base_model(self):
-        model_config = {
-            "resnet50": {"classifier": "fc"},
-            "convnext_large": {"classifier": "classifier"},
-            #"vit_h_14": {"classifier": "heads"},
-            "efficientnet_v2_l": {"classifier": "classifier"},
-            "regnet_y_32gf": {"classifier": "fc"},
-        }
+        model_name = self.cfg.model_name
+        if model_name not in MODEL_CONFIGS:
+            raise ValueError(f"Model {model_name} not supported")
 
-        name = self.cfg.model_name  # 🔧
-        if name not in model_config:
-            raise ValueError(f"Model {name} not supported")
+        model_details = MODEL_CONFIGS[model_name]
 
         weights = None
         if self.cfg.pretrained:
-            weight_map = {
-                "resnet50": models.ResNet50_Weights.IMAGENET1K_V1,
-                "efficientnet_v2_l": models.EfficientNet_V2_L_Weights.IMAGENET1K_V1,
-                "convnext_large": models.ConvNeXt_Large_Weights.IMAGENET1K_V1,
-                #"vit_h_14": models.ViT_H_14_Weights.IMAGENET1K_V1,
-                "regnet_y_32gf": models.RegNet_Y_32GF_Weights.IMAGENET1K_V1
-            }
-            weights = weight_map.get(name, None)
+            try:
+                weights = getattr(models, model_details["weights"])
+            except AttributeError:
+                warnings.warn(f"No weights enum for {model_name}, using default initialization")
+                weights = "DEFAULT"
 
-        model = getattr(models, name)(weights=weights)
+        model = getattr(models, model_name)(weights=weights)
 
         if self.cfg.freeze_encoder:
             for pname, param in model.named_parameters():
                 if not any(x in pname.lower() for x in ['fc', 'classifier', 'head']):
                     param.requires_grad = False
 
-        classifier_path = model_config[name]["classifier"].split('.')
+        classifier_path = model_details["classifier"].split('.')
         parent = model
         for part in classifier_path[:-1]:
             parent = getattr(parent, part)

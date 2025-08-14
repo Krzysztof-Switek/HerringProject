@@ -2,11 +2,12 @@ import time
 from datetime import datetime
 import torch
 import torch.optim as optim
-import numpy as np  # <-- DODANO IMPORT NUMPY
+import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 from omegaconf import OmegaConf
-from models.model import HerringModel
-from models.multitask_model import MultiTaskHerringModel
+from data_loader.dataset import HerringDataset
+from models.model import build_model
+from models.model_config import MODEL_CONFIGS
 from engine.loss_utills import LossFactory, MultiTaskLossWrapper
 from .trainer_metadata import get_class_metadata
 from .trainer_logger import (
@@ -23,14 +24,19 @@ from pathlib import Path
 
 def run_training_loop(trainer):
     """Główna pętla treningowa. Zwraca krotkę (best_score, log_dir) dla Optuny."""
+    # Load model-specific config and merge it into the main config
+    model_name = trainer.cfg.model_name
+    if model_name in MODEL_CONFIGS:
+        model_cfg = OmegaConf.create(MODEL_CONFIGS[model_name])
+        trainer.cfg = OmegaConf.merge(trainer.cfg, model_cfg)
+    else:
+        raise ValueError(f"Model '{model_name}' not found in MODEL_CONFIGS.")
+
+    trainer.data_loader = HerringDataset(trainer.cfg, path_manager=trainer.path_manager, population_mapper=trainer.population_mapper)
     train_loader, val_loader, class_names = trainer.data_loader.get_loaders()
     trainer.class_names = class_names
 
-    is_multitask = trainer.cfg.multitask_model.use
-    model_name = (
-        trainer.cfg.multitask_model.backbone_model.model_name
-        if is_multitask else trainer.cfg.base_model.base_model
-    )
+    is_multitask = trainer.cfg.mode == 'multitask'
 
     checkpoint_root = trainer.path_manager.checkpoint_dir()
     logs_root = trainer.path_manager.logs_dir()
@@ -56,16 +62,11 @@ def run_training_loop(trainer):
                 method=trainer.cfg.multitask_model.loss_weighting.method,
                 static_weights=getattr(trainer.cfg.multitask_model.loss_weighting, "static", None)
             )
-
         else:
             loss_fn = classification_loss
 
         # Model
-        trainer.model = (
-            MultiTaskHerringModel(trainer.cfg).to(trainer.device)
-            if is_multitask else
-            HerringModel(trainer.cfg).to(trainer.device)
-        )
+        trainer.model = build_model(trainer.cfg).to(trainer.device)
 
         optimizer = optim.AdamW(
             trainer.model.parameters(),

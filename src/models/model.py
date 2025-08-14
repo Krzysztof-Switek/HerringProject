@@ -3,6 +3,8 @@ import torch.nn as nn
 from torchvision import models
 from omegaconf import DictConfig
 import warnings
+from .model_config import MODEL_CONFIGS
+
 
 class HerringModel(nn.Module):
     def __init__(self, config: DictConfig):
@@ -14,35 +16,22 @@ class HerringModel(nn.Module):
         self._print_model_info()
 
     def _init_base_model(self) -> nn.Module:
-        model_config = {
-            "resnet50": {"image_size": 224, "classifier": "fc"},
-            "convnext_large": {"image_size": 384, "classifier": "classifier"},
-            "vit_h_14": {"image_size": 384, "classifier": "heads"},
-            "efficientnet_v2_l": {"image_size": 480, "classifier": "classifier"},
-            "regnet_y_32gf": {"image_size": 384, "classifier": "fc"},
-        }
+        model_name = self.cfg.base_model
+        if model_name not in MODEL_CONFIGS:
+            available = list(MODEL_CONFIGS.keys())
+            raise ValueError(f"Model {model_name} not configured. Choose from: {available}")
 
-        if self.cfg.base_model not in model_config:
-            available = list(model_config.keys())
-            raise ValueError(f"Model {self.cfg.base_model} not configured. Choose from: {available}")
+        model_details = MODEL_CONFIGS[model_name]
 
         weights = None
         if self.cfg.pretrained:
-            if self.cfg.base_model == "resnet50":
-                weights = models.ResNet50_Weights.IMAGENET1K_V1
-            elif self.cfg.base_model == "efficientnet_v2_l":
-                weights = models.EfficientNet_V2_L_Weights.IMAGENET1K_V1
-            elif self.cfg.base_model == "convnext_large":
-                weights = models.ConvNeXt_Large_Weights.IMAGENET1K_V1
-            elif self.cfg.base_model == "vit_h_14":
-                weights = models.ViT_H_14_Weights.IMAGENET1K_V1
-            elif self.cfg.base_model == "regnet_y_32gf":
-                weights = models.RegNet_Y_32GF_Weights.IMAGENET1K_V1
-            else:
-                warnings.warn(f"No weights enum for {self.cfg.base_model}, using default initialization")
+            try:
+                weights = getattr(models, model_details["weights"])
+            except AttributeError:
+                warnings.warn(f"No weights enum for {model_name}, using default initialization")
                 weights = "DEFAULT"
 
-        model = getattr(models, self.cfg.base_model)(weights=weights)
+        model = getattr(models, model_name)(weights=weights)
 
         if self.cfg.freeze_encoder:
             for name, param in model.named_parameters():
@@ -50,7 +39,7 @@ class HerringModel(nn.Module):
                     param.requires_grad = False
 
         dropout_p = getattr(self.cfg, "dropout_rate", 0.0)
-        classifier_path = model_config[self.cfg.base_model]["classifier"].split('.')
+        classifier_path = model_details["classifier"].split('.')
 
         parent = model
         for part in classifier_path[:-1]:
@@ -93,8 +82,13 @@ class HerringModel(nn.Module):
             x = x.to(self.device)
         return self.base(x)
 
+
 def build_model(cfg: DictConfig) -> nn.Module:
-    if cfg.multitask_model.use:
-        from models.multitask_model import MultiTaskHerringModel
+    """Builds the model based on the mode specified in the config."""
+    if cfg.mode == "multitask":
+        from .multitask_model import MultiTaskHerringModel
         return MultiTaskHerringModel(cfg)
-    return HerringModel(cfg)
+    elif cfg.mode == "single":
+        return HerringModel(cfg)
+    else:
+        raise ValueError(f"Unknown mode: {cfg.mode}")

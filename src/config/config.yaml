@@ -1,3 +1,8 @@
+# Global settings
+mode: "single"  # "single" or "multitask"
+model_name: "resnet50" # Choose from: resnet50, convnext_large, vit_h_14, efficientnet_v2_l, regnet_y_32gf
+
+# Data settings
 data:
   metadata_file: "data_loader/AnalysisWithOtolithPhoto_with_sets.xlsx"
   root_dir: "data"
@@ -6,52 +11,35 @@ data:
   test: "test"
   batch_size: 32
   active_populations: [1, 2]
-  augment_threshold: 0.7 # Klasy z liczbą próbek < 70% najliczniejszej klasy będą augmentowane
+  augment_threshold: 0.7
 
+# Model generic settings
 base_model:
-  base_model: "resnet50"
-  image_size: 224
   pretrained: true
   freeze_encoder: false
   dropout_rate: 0.5
   weight_decay: 0.01
 
-expert_model:
-  use: false
-  base_model: "efficientnet_v2_l"
-  image_size: 480
-  pretrained: true
-  freeze_encoder: false
-  dropout_rate: 0.3
-  weight_decay: 0.01
-
 multitask_model:
-  use: true                         # Czy używać multitaskingu
-  backbone_model:                  # ARCHITEKTURA BACKBONE
-    model_name: "resnet50"
-    image_size: 224
-    pretrained: true
-    freeze_encoder: false
-    dropout_rate: 0.5
-    weight_decay: 0.01
   classifier_head:
-    type: "linear"                  # Typ głowy klasyfikacyjnej
+    type: "linear"
     dropout_rate: 0.5
   regression_head:
-    type: "mlp"                     # Typ głowy regresyjnej
+    type: "mlp"
     hidden_dim: 128
     dropout_rate: 0.3
   loss_weighting:
-    method: "uncertainty"          # "static", "uncertainty", "gradnorm", "none"
+    method: "uncertainty" # "static", "uncertainty", "gradnorm", "none"
     static:
       classification: 1.0
       age: 0.3
   log_loss_components: true
-  metrics_weights:                  # NOWA SEKCJA
-    alpha: 0.34                     # Waga dla globalnego F1-score
-    beta: 0.33                      # Waga dla (1 - MAE_normalized)
-    gamma: 0.33                     # Waga dla F1_p2_y3_6
+  metrics_weights:
+    alpha: 0.34
+    beta: 0.33
+    gamma: 0.33
 
+# Augmentation settings
 augmentation:
   rotation: 30
   crop_scale: [0.8, 1.0]
@@ -67,14 +55,15 @@ augmentation:
   affine_shear: 10
   gaussian_blur_kernel: 3
 
+# Training settings
 training:
   loss_type:
+    - standard_ce
     #- class_balanced_focal
     #- focal_tversky
     #- ghm
     #- seesaw
     #- asymmetric_focal
-    - standard_ce
     #- sample_weighted_ce
     #- weighted_age_ce
     # - focal_loss_ageboost
@@ -84,41 +73,15 @@ training:
   learning_rate: 0.00001
   device: "auto"
   early_stopping_patience: 5
-  checkpoint_dir: "checkpoints"           # miejsce zapisu modelu
+  checkpoint_dir: "checkpoints"
 
-prediction:
-  model_path: "checkpoints/convnext_large_03-06/convnext_large_ACC_82.61.pth"
-  image_path: "data/test/Głębia_Gdańska_0013_otsu_OBRYS_1.jpg"
-  results_dir: "results/gradcam"
-  show_visualization: true
-  save_results: true                            # czy wyświetlać wykresy matplotlib
-
-prediction_modes:
-  #mode: "single"                                # "single" lub "batch"
-  #batch:
-   # num_images: 4                               # liczba obrazów do wyświetlenia w trybie batch
-   # min_confidence: 70                          # minimalna pewność predykcji dla obrazów w trybie batch
-  navigation:
-    image_dir: "data/test"                      # katalog z obrazami do nawigacji w trybie single
-
-
+# Visualization settings
 visualization:
   methods: ['gradcam', 'gradcam++', 'guided_backprop']
   display_mode: 'matrix'
   matrix_cols: 3
   save_individual: False
-  target_layer: "base.layer4.2.conv3"           #resnet50:"base.layer4.2.conv3"; efficientnet:"base.features.8.0"
   colormap: "jet"
   alpha: 0.5
   generate_heatmaps_in_report: true
   n_heatmap_cases: 3
-
-
-######################### ALTERNATYWNE MODELE ###########################
-#                                                                       #
-#  base_model: "convnext_large"                 # image_size: 384       #
-#  base_model: "vit_h_14"                       # image_size: 384       #
-#  base_model: "resnet50"                        # image_size: 224      #
-#  base_model: "regnet_y_32gf"                    # image_size: 384     #
-#               "efficientnet_v2_l"               # image_size: 480                                                        #
-######################### ALTERNATYWNE MODELE ###########################
