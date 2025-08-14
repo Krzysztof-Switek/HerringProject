@@ -3,8 +3,7 @@ from PIL import Image
 import torch
 import torch.nn.functional as F
 from torchvision import transforms
-from models.model import HerringModel
-from models.multitask_model import MultiTaskHerringModel
+from models.model import build_model
 from utils.population_mapper import PopulationMapper
 from omegaconf import OmegaConf
 from pathlib import Path
@@ -66,14 +65,14 @@ def _resolve_local_image_path(row, data_root: Path) -> Optional[Path]:
 
 
 def generate_heatmaps_for_report(
-    df_results: pd.DataFrame,
-    model,
-    cfg,
-    log_dir: Path,
-    transform,
-    loss_name: str,
-    data_root: Path,
-    n_cases: int = 3
+        df_results: pd.DataFrame,
+        model,
+        cfg,
+        log_dir: Path,
+        transform,
+        loss_name: str,
+        data_root: Path,
+        n_cases: int = 3
 ):
     """
     Generuje heatmapy dla trzech kategorii przypadków na podstawie *konkretnych*
@@ -143,7 +142,7 @@ def generate_heatmaps_for_report(
             try:
                 img_path = _resolve_local_image_path(row, data_root)
                 if img_path is None or not img_path.exists():
-                    print(f"    ❌ Nie znaleziono pliku lokalnie dla FileName='{row.get('FileName','')}'. "
+                    print(f"    ❌ Nie znaleziono pliku lokalnie dla FileName='{row.get('FileName', '')}'. "
                           f"Pominięto.")
                     continue
 
@@ -170,18 +169,14 @@ def generate_heatmaps_for_report(
     print("✅ Zakończono generowanie heatmap.")
 
 
-
 def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager,
                                 log_dir, full_name: str, limit_predictions: Optional[int] = None):
     cfg = path_manager.cfg
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     population_mapper = PopulationMapper(cfg.data.active_populations)
 
-    is_multitask = getattr(cfg, "multitask_model", {}).get("use", False)
-    if is_multitask:
-        model = MultiTaskHerringModel(cfg).to(device)
-    else:
-        model = HerringModel(cfg).to(device)
+    # Build the model using the factory, which respects the 'mode' in the config
+    model = build_model(cfg).to(device)
 
     checkpoint = torch.load(model_path, map_location=device)
     if 'model_state_dict' in checkpoint:
@@ -190,7 +185,10 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager,
         model.load_state_dict(checkpoint)
     model.eval()
 
-    image_size_to_use = cfg.multitask_model.backbone_model.image_size if is_multitask else cfg.base_model.image_size
+    # Redefine is_multitask based on the new config structure
+    is_multitask = cfg.mode == 'multitask'
+
+    image_size_to_use = cfg.image_size
     transform = transforms.Compose([
         transforms.Resize((image_size_to_use, image_size_to_use)),
         transforms.ToTensor(),
