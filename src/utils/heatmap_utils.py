@@ -3,6 +3,7 @@ import numpy as np
 import cv2
 from abc import ABC, abstractmethod
 
+
 def _extract_logits(output):
     """
     Zwraca tensor logitów klasyfikacyjnych o kształcie [N, C].
@@ -163,10 +164,12 @@ def create_heatmap_plot(
             method._register_hooks()
             heatmap = method.generate(image_tensor, pred_class_idx)
 
+            # Resize all heatmaps to the original image size
+            heatmap = cv2.resize(heatmap, original_image.size)
+
             if name == "guided_backprop":
                 axes[i].imshow(heatmap, cmap='gray')
             else:
-                heatmap = cv2.resize(heatmap, original_image.size)
                 axes[i].imshow(original_image)
                 axes[i].imshow(heatmap, cmap=cfg_visualization['colormap'], alpha=cfg_visualization['alpha'])
 
@@ -209,13 +212,29 @@ class GradCAMPP(GradCAM):
         one_hot[0, class_idx] = 1
         output.backward(gradient=one_hot, retain_graph=True)
 
-        grads = self.gradients[0].cpu().numpy()  # [C,H,W]
-        acts = self.activations[0].cpu().numpy()  # [C,H,W]
+        grads = self.gradients[0]  # [C,H,W]
+        activations = self.activations[0]  # [C,H,W]
 
-        # klasyczny wariant wag dla CAM++
-        weights = np.mean(np.maximum(grads, 0.0) ** 2, axis=(1, 2), keepdims=True)  # [C,1,1]
-        cam = np.sum(acts * weights, axis=0)  # [H,W]
-        cam = np.maximum(cam, 0)
+        # Poprawna implementacja Grad-CAM++
+        grads_pos = torch.relu(grads)
+
+        # Obliczanie alpha (wagi dla każdego piksela w mapie cech)
+        # alpha_ij_c = (d^2 Y^c / (d A_k_ij)^2) / (2 * d^2 Y^c / (d A_k_ij)^2 + sum_{a,b} A_k_{ab} * d^3 Y^c / (d A_k_ij)^3)
+        # Uproszczona, ale efektywna forma:
+        alpha_num = grads_pos.pow(2)
+        alpha_denom = 2 * alpha_num + (activations * grads_pos.pow(3)).sum(dim=(1, 2), keepdim=True)
+        alpha_denom = torch.where(alpha_denom != 0.0, alpha_denom,
+                                  torch.ones_like(alpha_denom))  # unikanie dzielenia przez zero
+
+        alphas = alpha_num / alpha_denom
+
+        # Obliczanie wag dla kanałów
+        weights = (alphas * grads_pos).sum(dim=(1, 2), keepdim=True)  # [C,1,1]
+
+        # Generowanie mapy CAM
+        cam = (weights * activations).sum(dim=0)  # [H,W]
+
+        cam = torch.relu(cam).cpu().numpy()
         cam = cv2.normalize(cam, None, 0, 1, cv2.NORM_MINMAX)
         return cam
 
