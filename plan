@@ -1,0 +1,701 @@
+PLAN ZMIAN
+ETAP 1 — Ustalenie source of truth i zamrożenie ścieżek wykonania
+1.1. Ustalić oficjalne entrypointy projektu
+
+Zostawić jako oficjalne:
+
+src/train.py — trening
+src/engine/predict_after_training.py — predykcja po checkpointcie
+src/config/config.yaml — jedyne źródło konfiguracji
+
+Do wycofania z roli source of truth:
+
+src/predict.py — obecnie niespójny z configiem i nieobsługujący poprawnie aktualnego trybu multitask. Używa cfg.model.base_model i cfg.data.image_size, których nie widać w obecnym config.yaml; dodatkowo mapuje klasy przez argmax + 1, zamiast przez PopulationMapper.
+
+Decyzja wykonawcza:
+
+albo usunąć src/predict.py,
+albo zostawić go tymczasowo, ale zmienić nazwę na src/predict_legacy.py i dopisać na górze komentarz LEGACY / DO NOT USE.
+
+Dlaczego:
+bo obecnie są co najmniej dwie ścieżki inferencji, a jedna z nich jest jawnie niespójna z aktualnym kontraktem projektu.
+
+ETAP 2 — Ujednolicenie kontraktu konfiguracji
+2.1. Naprawić wszystkie odwołania do starej struktury configu
+
+Pliki do poprawy:
+
+src/predict.py
+src/utils/path_manager.py
+
+Konkretne problemy:
+
+predict.py używa cfg.model.base_model i cfg.data.image_size, ale w aktualnym config.yaml konfiguracja jest zorganizowana inaczej. Widać sekcje base_model, multitask_model, training, prediction, nie widać sekcji model.
+PathManager.excel_predictions_output() też używa self.cfg.model.base_model, co jest niespójne z aktualnym configiem.
+
+Zmiana:
+wprowadzić jedną funkcję pomocniczą do pobierania aktywnej nazwy modelu, np. w nowym module:
+
+src/utils/config_helpers.py
+
+Proponowane funkcje:
+
+get_active_model_name(cfg)
+get_active_image_size(cfg)
+is_multitask_enabled(cfg)
+
+Następnie użyć ich w:
+
+dataset.py
+predict_after_training.py
+path_manager.py
+model.py
+multitask_model.py
+ewentualnie train.py / trainer.py
+
+Dlaczego:
+żeby usunąć lokalne, ręczne interpretowanie configu w wielu miejscach. Dzisiaj to właśnie ono powoduje rozjazdy.
+
+ETAP 3 — Ujednolicenie preprocessing train / val / predict
+3.1. Wydzielić jeden wspólny moduł transformacji
+
+Nowy plik do utworzenia:
+
+src/data_loader/transforms.py
+
+Przenieść z dataset.py:
+
+_get_image_size()
+_get_base_transforms()
+_get_strong_transforms()
+_get_val_transforms()
+
+i przepisać jako funkcje modułowe:
+
+get_image_size(cfg)
+get_train_transform(cfg, strength="base" | "strong")
+get_eval_transform(cfg)
+
+Dlaczego:
+obecnie dataset.py i predict_after_training.py budują transformacje osobno. To już doprowadziło do rozjazdu: walidacja używa Resize + CenterCrop + Normalize, a predykcja po treningu używa Resize + ToTensor + Normalize bez CenterCrop.
+
+3.2. Wymusić używanie get_eval_transform(cfg) w inferencji
+
+Plik do poprawy:
+
+src/engine/predict_after_training.py
+
+Zmiana:
+usunąć ręcznie zdefiniowany:
+
+transforms.Compose([...])
+
+i zastąpić go:
+
+transform = get_eval_transform(cfg)
+
+Dlaczego:
+predykcja ma używać dokładnie tej samej transformacji co walidacja. Dzisiaj nie używa.
+
+3.3. Podjąć decyzję o augmentacji treningowej
+
+Plik do poprawy:
+
+src/data_loader/dataset.py
+
+Stan obecny:
+zdefiniowane są train_transform_base i train_transform_strong, ale get_loaders() używa train_transform_base; silna augmentacja nie jest realnie podpięta do loadera treningowego.
+
+Decyzja wymagana:
+
+albo trening ma używać strong,
+albo base,
+albo wybór ma być sterowany przez config, np.:
+data.train_transform: "base" / "strong"
+
+Bez tej decyzji nie ruszać logiki dalej.
+To jest punkt, który wymaga jawnego rozstrzygnięcia projektowego.
+
+ETAP 4 — Ujednolicenie budowy modelu i inferencji
+4.1. Wprowadzić jeden builder modelu
+
+Pliki do poprawy:
+
+src/models/model.py
+src/models/multitask_model.py
+src/engine/predict_after_training.py
+src/engine/trainer_setup.py
+
+Stan obecny:
+
+model.py już ma build_model(cfg), który zwraca MultiTaskHerringModel albo HerringModel. To jest dobry kierunek.
+predict_after_training.py nadal ręcznie rozgałęzia się między HerringModel i MultiTaskHerringModel.
+
+Zmiana:
+w predict_after_training.py używać wyłącznie:
+
+from models.model import build_model
+model = build_model(cfg).to(device)
+
+Dlaczego:
+żeby nie duplikować logiki wyboru architektury.
+
+4.2. Wprowadzić wspólne ładowanie checkpointu
+
+Nowy plik do utworzenia:
+
+src/models/checkpoint_utils.py
+
+Funkcje:
+
+load_model_checkpoint(model, checkpoint_path, device)
+opcjonalnie extract_checkpoint_metadata(checkpoint)
+
+Użyć w:
+
+predict_after_training.py
+trainer_setup.py
+predict.py jeśli zostaje tymczasowo
+
+Dlaczego:
+żeby nie powielać logiki typu if 'model_state_dict' in checkpoint. W tej chwili występuje ręcznie w predykcji.
+
+ETAP 5 — Naprawa inferencji i mapowania klas
+5.1. Wszędzie używać PopulationMapper
+
+Pliki do poprawy:
+
+src/predict.py
+src/engine/predict_after_training.py
+sprawdzić też train_loop.py i logger, gdy będzie otwarty
+
+Stan obecny:
+
+predict_after_training.py używa PopulationMapper — to jest poprawne.
+predict.py używa argmax + 1, co jest złym kontraktem, bo zakłada numerację klas 1..N i pomija oficjalny mapper.
+
+Zmiana:
+jedynym źródłem prawdy o klasach ma być:
+
+src/utils/population_mapper.py
+5.2. Dodać wspólną funkcję inferencji pojedynczego batcha
+
+Nowy plik lub nowy moduł:
+
+src/engine/inference.py
+
+Funkcje:
+
+predict_population_logits(model, batch, cfg)
+decode_population_predictions(logits, population_mapper)
+decode_multitask_outputs(outputs, population_mapper)
+
+Dlaczego:
+obecnie predykcja ma logikę zaszytą w predict_after_training.py, co utrudnia testowanie.
+
+ETAP 6 — Czyszczenie plików legacy, testowych i eksperymentalnych
+6.1. Usunąć lub wyraźnie odseparować katalog delete/
+
+Pliki do usunięcia albo przeniesienia poza repo aktywne:
+
+delete/loss_utils_old_delete.py
+delete/trainer_core_delete.py
+delete/trainer_old_delete.py
+
+Snapshot pokazuje, że to stare wersje rdzenia treningowego. Nie powinny siedzieć w aktywnym drzewie projektu, jeśli nie są source of truth.
+
+Decyzja wykonawcza:
+
+jeśli nie są już potrzebne: usuń z repo,
+jeśli chcesz je zachować: przenieś do archive/legacy/ i wyklucz z analiz.
+6.2. Przenieść test z src/plot_predictions.py
+
+Plik do usunięcia lub przeniesienia:
+
+src/plot_predictions.py
+
+Snapshot pokazuje, że ten plik zawiera fixture pytest i test test_loss_integration_with_model, więc nie powinien być w src/.
+
+Zmiana:
+
+przenieść logikę testową do tests/losses_integration_test.py
+jeśli jakaś część pliku jest naprawdę produkcyjna, rozdzielić na:
+src/...
+tests/...
+6.3. Oznaczyć pliki eksperymentalne i „do sprawdzenia”
+
+Pliki wymagające decyzji:
+
+src/models/model_heatmaps_do_sprawdzenia.py
+src/ALL_4_MODELS.py
+src/PLOT_ALL_4_MODELS_AND_CUMULATIVE.py
+src/heat_maps_generator.py
+src/heat_maps_generator_with_age.py
+src/utils/plot_accuracy_per_age_delete.py
+
+Snapshot oznacza je jako source/high-risk lub sugeruje, że są eksperymentalne. Nie twierdzę, że są zbędne, ale nie wyglądają na rdzeń treningu/inferencji.
+
+Decyzja wymagana:
+dla każdego z tych plików przypisać jeden status:
+
+CORE
+REPORTING
+EXPERIMENTAL
+LEGACY
+
+i fizycznie przeorganizować katalogi według tej roli.
+
+ETAP 7 — Oczyszczenie dataset.py
+7.1. Usunąć debug printy z get_loaders()
+
+Plik do poprawy:
+
+src/data_loader/dataset.py
+
+Do usunięcia lub zastąpienia loggerem:
+
+debug batch print
+debug meta print
+debug biologiczne klasy print
+✔️ Etykiety klas poprawne ... przez logger/debug mode
+
+Snapshot pokazuje jawne printy debugowe w kodzie produkcyjnym.
+
+7.2. Rozdzielić odpowiedzialności klasy HerringDataset
+
+Plik do poprawy:
+
+src/data_loader/dataset.py
+
+Docelowo rozdzielić na:
+
+metadane: ładowanie i walidacja Excela
+transformacje
+budowę datasetów
+budowę dataloaderów
+
+Dlaczego:
+teraz jedna klasa robi za dużo naraz: config, path manager, metadata, class counts, transforms, label validation, loaders.
+
+ETAP 8 — Naprawa PathManager
+8.1. Zmienić excel_predictions_output()
+
+Plik do poprawy:
+
+src/utils/path_manager.py
+
+Problem:
+używa self.cfg.model.base_model, a to nie zgadza się z aktualnym configiem.
+
+Zmiana:
+używać wspólnej funkcji:
+
+get_active_model_name(cfg)
+8.2. Dodać jawne ścieżki dla wyników inferencji
+
+W PathManager warto dodać:
+
+prediction_output_dir()
+prediction_excel_path(loss_name=None)
+checkpoint_path_from_cfg()
+
+żeby inferencja nie budowała ścieżek sama.
+
+ETAP 9 — Logging zamiast print
+9.1. Zastąpić print() loggerem w rdzeniu pipeline’u
+
+Najpierw w plikach krytycznych:
+
+src/data_loader/dataset.py
+src/engine/trainer.py
+src/engine/trainer_setup.py
+src/engine/predict_after_training.py
+src/models/model.py
+
+Snapshot pokazuje dużo print() w kodzie produkcyjnym.
+
+Zmiana:
+albo standardowy logging,
+albo spiąć to z istniejącym trainer_logger.py.
+
+ETAP 10 — Testy kontraktowe, które muszą powstać
+10.1. Dodać test zgodności preprocessing
+
+Nowy test:
+
+tests/test_eval_transform_contract.py
+
+Ma sprawdzać:
+
+że inferencja używa dokładnie tego samego eval transform co walidacja,
+że rozmiar obrazu pochodzi z tego samego helpera.
+10.2. Dodać test zgodności model buildera
+
+Nowy test:
+
+tests/test_model_builder_contract.py
+
+Ma sprawdzać:
+
+build_model(cfg) zwraca poprawny typ modelu dla:
+multitask_model.use = True
+multitask_model.use = False
+10.3. Dodać test zgodności train-vs-predict
+
+Nowy test:
+
+tests/test_train_predict_contract.py
+
+Ma sprawdzać minimum:
+
+ta sama architektura modelu jest budowana w treningu i inferencji,
+to samo mapowanie klas przez PopulationMapper,
+ten sam rozmiar wejścia,
+poprawne ładowanie checkpointu,
+poprawny tryb model.eval() po załadowaniu w inferencji.
+10.4. Rozszerzyć obecny test anty-regresyjny dla modelu
+
+Masz już test_no_leftover_model_keyword.py, ale on nie wystarcza. Powinien pilnować nie tylko słowa model, ale też starych ścieżek configowych typu:
+
+cfg.model.base_model
+cfg.data.image_size
+ETAP 11 — requirements.txt i higiena środowiska
+11.1. Naprawić błędne wpisy w requirements.txt
+
+Snapshot pokazuje wpisy z tyldą:
+
+numpy~
+pillow~
+pandas~
+seaborn~
+pytest~
+reportlab~
+
+To trzeba poprawić natychmiast. Nie zgaduję wersji; trzeba wpisać poprawne specyfikatory albo same nazwy pakietów.
+
+11.2. Dodać README_DEV.md
+
+Nowy plik:
+
+README_DEV.md
+
+Ma zawierać:
+
+jak uruchamiać trening,
+jak uruchamiać inferencję,
+który plik jest source of truth,
+jak odpalać testy,
+które katalogi są legacy / reporting / experimental.
+Priorytety wykonania
+Priorytet P0 — zrobić od razu
+Wycofać src/predict.py z użycia albo przemianować na legacy.
+Naprawić PathManager.excel_predictions_output() pod aktualny config.
+Wydzielić wspólne get_eval_transform(cfg) i podpiąć je do predict_after_training.py.
+Ustalić, czy trening używa base czy strong augmentacji.
+Usunąć test z src/plot_predictions.py i przenieść go do tests/.
+Priorytet P1 — po ustabilizowaniu P0
+Wprowadzić config_helpers.py.
+Wprowadzić checkpoint_utils.py.
+Przerzucić inferencję na build_model(cfg).
+Usunąć debug print() z dataset.py.
+Oczyścić delete/ i pliki eksperymentalne.
+Priorytet P2 — domknięcie jakości
+Dodać testy kontraktowe.
+Naprawić requirements.txt.
+Dopisać docstringi i README_DEV.md.
+Lista plików: zmienić / usunąć / utworzyć
+Zmienić
+src/data_loader/dataset.py
+src/engine/predict_after_training.py
+src/utils/path_manager.py
+src/models/model.py
+src/engine/trainer_setup.py — podpiąć wspólne helpery model/checkpoint/config; pełna zmiana zależy od zawartości, ale to centralny punkt pipeline’u.
+requirements.txt
+Usunąć albo zdegradować do legacy
+src/predict.py
+src/plot_predictions.py z src/, po rozdzieleniu testowej zawartości
+delete/loss_utils_old_delete.py
+delete/trainer_core_delete.py
+delete/trainer_old_delete.py
+Utworzyć
+src/data_loader/transforms.py
+src/utils/config_helpers.py
+src/models/checkpoint_utils.py
+src/engine/inference.py
+tests/test_eval_transform_contract.py
+tests/test_model_builder_contract.py
+tests/test_train_predict_contract.py
+README_DEV.md
+
+
+
+
+PLAN WERSJA DO WDROŻENIA
+P0 — natychmiast porządkujemy source of truth
+1. Wycofać src/predict.py z aktywnego użycia
+
+Plik: src/predict.py
+Akcja: zmienić nazwę na src/predict_legacy.py albo przenieść do archive/legacy/.
+Dlaczego: plik jest niespójny z aktualnym config.yaml i z aktualną logiką mapowania klas. Nie powinien być już traktowany jako oficjalna inferencja.
+
+Dodatkowo:
+
+dodać na górze komentarz:
+# LEGACY - NIE UŻYWAĆ W AKTUALNYM PIPELINE
+przeszukać repo i upewnić się, że nic go nie woła jako aktywnego entrypointu — snapshot nie pokazuje go jako centralnego elementu treningu, a aktywna ścieżka inferencji jest w engine/predict_after_training.py.
+P0 — wprowadzamy sterowanie siłą augmentacji z configu
+2. Dodać wybór trybu augmentacji do config.yaml
+
+Plik: src/config/config.yaml
+Akcja: dodać sekcję, np.:
+
+augmentation:
+  mode: "strong"   # "base" | "strong"
+  rotation: 30
+  crop_scale: [0.8, 1.0]
+  hflip_prob: 0.5
+  vflip_prob: 0.5
+  brightness: 0.2
+  contrast: 0.2
+  saturation: 0.2
+  hue: 0.05
+  affine_degrees: 15
+  affine_translate: [0.1, 0.1]
+  affine_scale: [0.9, 1.1]
+  affine_shear: 10
+  gaussian_blur_kernel: 3
+
+Domyślnie: mode: "strong"
+To jest zgodne z Twoją intencją: mało danych, więc domyślnie mocniejsza augmentacja, ale z możliwością przełączenia na łagodniejszą. Obecnie config ma parametry augmentacji, ale nie ma przełącznika wyboru ścieżki.
+
+3. Podpiąć wybór augmentacji w dataset.py
+
+Plik: src/data_loader/dataset.py
+Funkcje do zmiany:
+
+__init__
+get_loaders
+opcjonalnie dodać nową metodę _get_train_transform()
+
+Stan obecny:
+dataset.py tworzy train_transform_base i train_transform_strong, ale w loaderze treningowym używa tylko jednej ścieżki; to wymaga domknięcia konfiguracją.
+
+Docelowa zmiana:
+
+dodać metodę:
+_get_train_transform(self)
+która wybiera:
+self.train_transform_strong gdy cfg.augmentation.mode == "strong"
+self.train_transform_base gdy cfg.augmentation.mode == "base"
+w get_loaders() używać tylko:
+train_transform = self._get_train_transform()
+
+Dlaczego:
+jeden jawny kontrakt, zero ręcznego przepinania w kodzie.
+
+P0 — ujednolicamy preprocessing walidacji i predykcji
+4. Wydzielić wspólne transformacje do osobnego modułu
+
+Nowy plik: src/data_loader/transforms.py
+
+Przenieść z dataset.py:
+
+_get_image_size
+_get_base_transforms
+_get_strong_transforms
+_get_val_transforms
+
+Nowe funkcje:
+
+get_image_size(cfg)
+get_train_transform(cfg, mode="strong")
+get_eval_transform(cfg)
+
+Obecnie dataset.py buduje walidacyjne transformacje z CenterCrop, a predict_after_training.py buduje inferencję ręcznie i bez CenterCrop, więc train/val/predict nie są spójne.
+
+5. Przepiąć predict_after_training.py na wspólny eval transform
+
+Plik: src/engine/predict_after_training.py
+Akcja: usunąć lokalne:
+
+transforms.Compose([...])
+
+i zastąpić:
+
+transform = get_eval_transform(cfg)
+
+Dlaczego:
+to zamyka najważniejszy rozjazd między walidacją i inferencją. predict_after_training.py jest dziś aktywną inferencją po checkpointcie, więc to musi być poprawione od razu.
+
+P1 — centralizujemy interpretację configu
+6. Dodać helpery configu
+
+Nowy plik: src/utils/config_helpers.py
+
+Funkcje do utworzenia:
+
+is_multitask_enabled(cfg)
+get_active_model_name(cfg)
+get_active_image_size(cfg)
+get_augmentation_mode(cfg)
+
+Dlaczego:
+teraz różne pliki interpretują config po swojemu. To właśnie doprowadziło do błędów typu cfg.model.base_model w starym predict.py.
+
+7. Podmienić ręczne czytanie configu w kluczowych plikach
+
+Pliki do poprawy:
+
+src/data_loader/dataset.py
+src/engine/predict_after_training.py
+src/utils/path_manager.py
+src/models/model.py
+src/models/multitask_model.py
+
+Cel:
+żaden z tych plików nie powinien sam zgadywać, gdzie siedzi nazwa modelu albo rozmiar obrazu.
+
+P1 — jedna oficjalna ścieżka budowy modelu i checkpointu
+8. Wymusić użycie build_model(cfg) wszędzie poza legacy
+
+Pliki:
+
+src/engine/predict_after_training.py
+src/engine/trainer_setup.py
+
+Snapshot pokazuje, że model.py ma już build_model(...), a predict_after_training.py nadal ręcznie przełącza się między HerringModel i MultiTaskHerringModel. To trzeba zwinąć do jednego buildera.
+
+9. Dodać wspólny loader checkpointu
+
+Nowy plik: src/models/checkpoint_utils.py
+
+Funkcja:
+
+load_model_checkpoint(model, checkpoint_path, device)
+
+Użyć w:
+
+src/engine/predict_after_training.py
+src/engine/trainer_setup.py
+
+Dlaczego:
+dziś logika ładowania checkpointu jest rozproszona i ręczna. predict_after_training.py już ma warunek if 'model_state_dict' in checkpoint, więc widać konkretny fragment do wyniesienia.
+
+P1 — czyścimy pliki ewidentnie nieaktywne lub źle umieszczone
+10. Przenieść test z src/plot_predictions.py
+
+Plik: src/plot_predictions.py
+Akcja: przenieść testową zawartość do tests/losses_integration_test.py albo tests/test_loss_integration_with_model.py
+
+Snapshot pokazuje, że ten plik w src/ zawiera fixture pytest i test, więc nie powinien być w kodzie źródłowym.
+
+11. Opróżnić katalog delete/
+
+Pliki:
+
+delete/loss_utils_old_delete.py
+delete/trainer_core_delete.py
+delete/trainer_old_delete.py
+
+Akcja: przenieść do archive/legacy/ albo usunąć.
+Snapshot jednoznacznie pokazuje, że to stary kod pomocniczy/legacy.
+
+P1 — uporządkować PathManager
+12. Naprawić stare odwołania do configu w path_manager.py
+
+Plik: src/utils/path_manager.py
+Akcja: sprawdzić i usunąć użycie starego kontraktu typu cfg.model.base_model; zastąpić helperem get_active_model_name(cfg)
+
+To już wcześniej wyszło jako niespójność z aktualnym config.yaml. Sam config ma sekcje base_model i multitask_model.backbone_model, nie model.
+
+P1 — ograniczamy hałas w kodzie produkcyjnym
+13. Usunąć debug print() z rdzenia pipeline’u
+
+Najpierw pliki:
+
+src/data_loader/dataset.py
+src/engine/trainer.py
+src/engine/predict_after_training.py
+src/models/model.py
+
+Snapshot pokazuje liczne print() w tych plikach. W dataset.py masz wręcz debug batchy i metadanych, a w trainer.py walidację struktury danych i logi środowiskowe na print.
+
+Akcja:
+zastąpić loggerem albo usunąć debugowe linie.
+
+P2 — testy kontraktowe, które zabezpieczą projekt
+14. Dodać test wyboru augmentacji
+
+Nowy plik: tests/test_augmentation_mode_contract.py
+
+Ma sprawdzać:
+
+cfg.augmentation.mode = "base" -> trening używa base transform
+cfg.augmentation.mode = "strong" -> trening używa strong transform
+
+To jest dokładnie Twoja intencja projektowa, więc warto od razu ją ubrać w test.
+
+15. Dodać test zgodności eval transform
+
+Nowy plik: tests/test_eval_transform_contract.py
+
+Ma sprawdzać:
+
+dataset.py i predict_after_training.py korzystają z tej samej funkcji get_eval_transform(cfg)
+CenterCrop nie zniknie przez przypadek z inferencji
+
+To zabezpiecza najważniejszy dziś błąd logiczny.
+
+16. Dodać test anty-regresyjny dla starego kontraktu configu
+
+Nowy lub rozszerzony plik:
+
+rozszerzyć tests/test_no_leftover_model_keyword.py
+
+Dodać wykrywanie:
+
+cfg.model.base_model
+cfg.data.image_size
+
+Bo właśnie te stare ścieżki występują w legacy predict.py i nie powinny wrócić do aktywnego kodu.
+
+KOLEJNOŚĆ WDROŻENIA
+Sprint 1
+src/predict.py -> src/predict_legacy.py albo archive/legacy/predict.py
+config.yaml -> dodać augmentation.mode: "strong"
+dataset.py -> dodać wybór base/strong z configu
+utworzyć src/data_loader/transforms.py
+predict_after_training.py -> użyć get_eval_transform(cfg) zamiast lokalnego Compose
+przenieść test z src/plot_predictions.py do tests/
+Sprint 2
+utworzyć src/utils/config_helpers.py
+utworzyć src/models/checkpoint_utils.py
+przepiąć predict_after_training.py na build_model(cfg)
+poprawić path_manager.py
+wyczyścić delete/
+Sprint 3
+testy kontraktowe
+logger zamiast print()
+docstringi i README_DEV.md
+LISTA PLIKÓW DO DZIAŁANIA
+Zmienić
+src/config/config.yaml
+src/data_loader/dataset.py
+src/engine/predict_after_training.py
+src/utils/path_manager.py
+src/engine/trainer.py
+src/models/model.py
+tests/test_no_leftover_model_keyword.py
+Wycofać / przenieść
+src/predict.py
+src/plot_predictions.py
+delete/loss_utils_old_delete.py
+delete/trainer_core_delete.py
+delete/trainer_old_delete.py
+Utworzyć
+src/data_loader/transforms.py
+src/utils/config_helpers.py
+src/models/checkpoint_utils.py
+tests/test_augmentation_mode_contract.py
+tests/test_eval_transform_contract.py
+

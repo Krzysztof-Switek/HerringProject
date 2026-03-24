@@ -1,9 +1,14 @@
-from pathlib import Path
+from __future__ import annotations
+
 from datetime import datetime
+from pathlib import Path
+
+from .config_helpers import get_active_model_name
+
 
 class PathManager:
     def __init__(self, project_root: Path, cfg):
-        self.project_root = project_root.resolve()
+        self.project_root = Path(project_root).resolve()
         self.cfg = cfg
         self.experiment_date = datetime.now().strftime("%Y-%m-%d")
 
@@ -29,16 +34,17 @@ class PathManager:
         return self.results_dir() / "logs"
 
     def excel_predictions_output(self, loss_name: str) -> Path:
-        model_name = self.cfg.model.base_model.replace("/", "_").lower()
+        model_name = get_active_model_name(self.cfg).replace("/", "_").lower()
         date = self.experiment_date
         output_dir = self.logs_dir() / f"{model_name}_{loss_name}_{date}"
         output_dir.mkdir(parents=True, exist_ok=True)
         filename = f"{model_name}_{date}_predictions.xlsx"
         return output_dir / filename
 
-    def _resolve(self, path_str: str, subdir: str = None) -> Path:
+    def _resolve(self, path_str: str, subdir: str | None = None) -> Path:
         path = Path(path_str)
         if path.is_absolute():
             return path
+
         base = self.project_root / subdir if subdir else self.project_root
         return (base / path).resolve()

@@ -48,6 +48,7 @@ multitask_model:
   log_loss_components: true
 
 augmentation:
+  mode: "strong"
   rotation: 30
   crop_scale: [0.8, 1.0]
   hflip_prob: 0.5

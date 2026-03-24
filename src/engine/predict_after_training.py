@@ -1,125 +1,145 @@
+from __future__ import annotations
+
+from pathlib import Path
+
 import pandas as pd
-from PIL import Image
 import torch
 import torch.nn.functional as F
-from torchvision import transforms
-from models.model import HerringModel
-from models.multitask_model import MultiTaskHerringModel
-from utils.population_mapper import PopulationMapper  # 🟢 DODANO
+from PIL import Image
+
+from ..data_loader.transforms import get_eval_transform
+from ..models.checkpoint_utils import load_model_checkpoint
+from ..models.model import build_model
+from ..utils.population_mapper import PopulationMapper
+
+
+def _collect_all_image_paths(data_root: Path, active_populations) -> list[Path]:
+    image_paths: list[Path] = []
+
+    for split in ("train", "val", "test"):
+        for pop in active_populations:
+            folder = data_root / split / str(pop)
+            if not folder.exists():
+                continue
+
+            image_paths.extend(sorted(folder.glob("*.jpg")))
+            image_paths.extend(sorted(folder.glob("*.jpeg")))
+            image_paths.extend(sorted(folder.glob("*.png")))
+
+    return image_paths
+
+
+def _prepare_metadata_dataframe(excel_path: Path) -> pd.DataFrame:
+    df = pd.read_excel(excel_path)
+
+    if "FileName" not in df.columns:
+        if "FilePath" in df.columns:
+            df["FileName"] = df["FilePath"].astype(str).map(lambda x: Path(x).name)
+        else:
+            raise ValueError("Brakuje kolumny 'FileName' lub 'FilePath' w pliku metadata")
+
+    df["FileName"] = df["FileName"].astype(str).str.strip()
+    return df
+
 
 def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, log_dir, full_name):
-    import pandas as pd
-    from PIL import Image
-    import torch
-    import torch.nn.functional as F
-    from torchvision import transforms
-    from models.model import HerringModel
-    from models.multitask_model import MultiTaskHerringModel
-    from utils.population_mapper import PopulationMapper
-
     cfg = path_manager.cfg
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     population_mapper = PopulationMapper(cfg.data.active_populations)
+    is_multitask = bool(getattr(cfg.multitask_model, "use", False))
 
-    # Ustal typ modelu
-    is_multitask = getattr(cfg, "multitask_model", {}).get("use", False)
-    if is_multitask:
-        model = MultiTaskHerringModel(cfg).to(device)
-    else:
-        model = HerringModel(cfg).to(device)
-
-    checkpoint = torch.load(model_path, map_location=device)
-    if 'model_state_dict' in checkpoint:
-        model.load_state_dict(checkpoint['model_state_dict'])
-    else:
-        model.load_state_dict(checkpoint)
+    model = build_model(cfg).to(device)
+    load_model_checkpoint(model, model_path, device)
     model.eval()
 
-    transform = transforms.Compose([
-        transforms.Resize(cfg.base_model.image_size),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ])
+    transform = get_eval_transform(cfg)
 
     excel_path = path_manager.metadata_file()
-    df = pd.read_excel(excel_path)
-    if "FilePath" not in df.columns:
-        raise ValueError("Brakuje kolumny 'FilePath' zawierającej ścieżki do obrazów")
+    df = _prepare_metadata_dataframe(excel_path)
 
     data_root = path_manager.data_root()
-    folders = [f"train/{pop}" for pop in population_mapper.active_populations] + \
-              [f"val/{pop}" for pop in population_mapper.active_populations] + \
-              [f"test/{pop}" for pop in population_mapper.active_populations]
-    all_image_paths = []
-    for folder in folders:
-        folder_path = data_root / folder
-        if folder_path.exists():
-            all_image_paths.extend(folder_path.glob("*.jpg"))
+    all_image_paths = _collect_all_image_paths(data_root, population_mapper.active_populations)
 
-    predictions = {}
-    total = len(all_image_paths)
-    print(f"\n🔍 Start predykcji ({loss_name}) na {total} obrazach...")
+    predictions: dict[str, tuple[int | None, float | None, float | None]] = {}
 
-    for i, image_path in enumerate(all_image_paths, 1):
+    for image_path in all_image_paths:
         try:
-            if i % 100 == 0 or i == total:
-                print(f"Przetworzono {i} z {total} obrazów...")
             image = Image.open(image_path).convert("RGB")
             input_tensor = transform(image).unsqueeze(0).to(device)
+
             with torch.no_grad():
+                outputs = model(input_tensor)
+
                 if is_multitask:
-                    pop_logits, age_pred = model(input_tensor)
+                    pop_logits, age_pred = outputs
                     probs = F.softmax(pop_logits, dim=1)[0]
-                    pred_idx = pop_logits.argmax().item()
+                    pred_idx = int(torch.argmax(pop_logits, dim=1).item())
                     pred_class = population_mapper.to_pop(pred_idx)
-                    confidence = float(probs[pred_idx]) * 100
-                    predicted_age = float(age_pred[0].item())  # <-- WIEK jako liczba zmiennoprzecinkowa
+                    confidence = float(probs[pred_idx].item()) * 100.0
+                    predicted_age = float(age_pred.view(-1)[0].item())
                 else:
-                    pop_logits = model(input_tensor)
+                    pop_logits = outputs
                     probs = F.softmax(pop_logits, dim=1)[0]
-                    pred_idx = pop_logits.argmax().item()
+                    pred_idx = int(torch.argmax(pop_logits, dim=1).item())
                     pred_class = population_mapper.to_pop(pred_idx)
-                    confidence = float(probs[pred_idx]) * 100
-                    predicted_age = None  # brak predykcji wieku
-            key = image_path.name.lower()
-            predictions[key] = (pred_class, round(confidence, 2), predicted_age)
-        except Exception as e:
-            print(f"Błąd przetwarzania obrazu {image_path}: {e}")
+                    confidence = float(probs[pred_idx].item()) * 100.0
+                    predicted_age = None
+
+            predictions[image_path.name.lower()] = (
+                pred_class,
+                round(confidence, 2),
+                predicted_age,
+            )
+
+        except Exception as exc:
+            print(f"Błąd przetwarzania obrazu {image_path}: {exc}")
 
     pred_column = f"{loss_name}_pred"
     prob_column = f"{loss_name}_prob"
     age_column = f"{loss_name}_age_pred"
-    pred_classes, pred_probs, pred_ages, not_found = [], [], [], []
+
+    pred_classes = []
+    pred_probs = []
+    pred_ages = []
+    not_found = []
 
     for file_name in df["FileName"]:
-        key = str(file_name).lower()
+        key = str(file_name).strip().lower()
         pred = predictions.get(key, (None, None, None))
         if pred[0] is None:
             not_found.append(key)
+
         pred_classes.append(pred[0])
         pred_probs.append(pred[1])
         pred_ages.append(pred[2])
 
-    df[pred_column] = pred_classes
-    df[prob_column] = pred_probs
-    if is_multitask:
-        df[age_column] = pred_ages
+    new_cols = pd.DataFrame({
+        pred_column: pred_classes,
+        prob_column: pred_probs,
+    })
 
-    output_path = log_dir / f"{full_name}_predictions.xlsx"
+    if is_multitask:
+        new_cols[age_column] = pred_ages
+
+    output_path = Path(log_dir) / f"{full_name}_predictions.xlsx"
+
     if output_path.exists():
         existing_df = pd.read_excel(output_path)
+
         for col in [pred_column, prob_column, age_column]:
             if col in existing_df.columns:
-                existing_df = existing_df.drop(columns=[col], errors='ignore')
-        # Dodajemy tylko nowe kolumny
-        if is_multitask:
-            df = pd.concat([existing_df, df[[pred_column, prob_column, age_column]]], axis=1)
-        else:
-            df = pd.concat([existing_df, df[[pred_column, prob_column]]], axis=1)
+                existing_df = existing_df.drop(columns=[col], errors="ignore")
 
-    df.to_excel(output_path, index=False)
+        result_df = pd.concat([existing_df, new_cols], axis=1)
+    else:
+        result_df = pd.concat([df, new_cols], axis=1)
+
+    result_df.to_excel(output_path, index=False)
+
     print(f"\n📊 Liczba przetworzonych obrazów: {len(predictions)}")
+    if not_found:
+        print(f"❗Nie znaleziono predykcji dla {len(not_found)} plików metadata.")
+        print(f"Przykłady brakujących plików: {not_found[:5]}")
     print(f"✅ Zapisano predykcje ({loss_name}) do: {output_path}")
     print("⏭️ Przechodzę do kolejnej funkcji straty...\n")
-
