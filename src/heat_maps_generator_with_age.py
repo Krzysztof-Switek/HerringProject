@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from torchvision import transforms
 from models.model import HerringModel
-from src.models.model_heatmaps import GradCAM, GradCAMPP, GuidedBackprop
+from models.model_heatmaps import GradCAM, GradCAMPP, GuidedBackprop
 from omegaconf import OmegaConf
 import matplotlib.pyplot as plt
 import numpy as np
