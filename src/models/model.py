@@ -95,6 +95,6 @@ class HerringModel(nn.Module):
 
 def build_model(cfg: DictConfig) -> nn.Module:
     if cfg.multitask_model.use:
-        from models.multitask_model import MultiTaskHerringModel
+        from .multitask_model import MultiTaskHerringModel
         return MultiTaskHerringModel(cfg)
     return HerringModel(cfg)

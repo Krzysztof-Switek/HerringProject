@@ -151,7 +151,10 @@ class AsymmetricFocalLoss(BaseMultitaskLossWrapper):
         probs = torch.exp(log_probs)
         targets_onehot = F.one_hot(targets, num_classes=outputs.size(1)).float()
         pt = (probs * targets_onehot).sum(dim=1)
-        gamma = torch.where(targets == 1, self.gamma_pos, self.gamma_neg)
+        preds = outputs.argmax(dim=1)
+        gamma_pos = torch.tensor(self.gamma_pos, dtype=torch.float32, device=outputs.device)
+        gamma_neg = torch.tensor(self.gamma_neg, dtype=torch.float32, device=outputs.device)
+        gamma = torch.where(preds == targets, gamma_pos, gamma_neg)
         loss = -((1 - pt) ** gamma) * torch.log(pt + 1e-8)
         return loss.mean()
 
@@ -256,8 +259,8 @@ class MultiTaskLossWrapper(nn.Module):
             self.static_weights = static_weights
         elif method == "gradnorm":
             self.alpha = 1.5  # zalecane w GradNorm
-            self.initial_losses = None  # zostanie ustalone po 1 ep.
-            self.weights = nn.Parameter(torch.ones(2))  # wagi do optymalizacji
+            self.initial_losses = None  # zostanie ustalone po pierwszym batchu
+            self.weights = nn.Parameter(torch.ones(2))  # wagi zadań do optymalizacji
         elif method == "none":
             pass
         else:
@@ -267,6 +270,10 @@ class MultiTaskLossWrapper(nn.Module):
         logits, age_pred = outputs
         cls_loss = self.classification_loss(logits, targets, meta)
         reg_loss = self.regression_loss(age_pred.squeeze(), meta['wiek'].float())
+
+        # Zapamiętaj straty składowe do odczytu przez pętlę treningową
+        self._last_cls_loss = cls_loss.detach()
+        self._last_reg_loss = reg_loss.detach()
 
         if self.method == "uncertainty":
             precision_cls = torch.exp(-self.log_vars[0])
@@ -279,31 +286,30 @@ class MultiTaskLossWrapper(nn.Module):
                    self.static_weights['age'] * reg_loss
 
         elif self.method == "gradnorm":
-            # Ustal straty z początku (1 epoka)
             if self.initial_losses is None:
                 self.initial_losses = (cls_loss.detach(), reg_loss.detach())
 
-            # Oblicz gradienty względem shared weights
-            self.weights = nn.Parameter(F.relu(self.weights))
+            self.weights.data = F.relu(self.weights.data)
             loss_vec = torch.stack([cls_loss, reg_loss])
             weighted_loss = torch.sum(self.weights * loss_vec)
-            weighted_loss.backward(retain_graph=True)
 
-            # Oblicz gradienty normy
+            # Gradienty strat względem wag zadań (allow_unused, bo loss_i nie zależy
+            # bezpośrednio od self.weights w grafie; pełna implementacja GradNorm
+            # wymaga dostępu do parametrów backbonu, co nie jest tu dostępne)
             grads = []
-            for i, l in enumerate([cls_loss, reg_loss]):
-                grad = torch.autograd.grad(l, self.weights, retain_graph=True, allow_unused=True)[0]
-                grads.append(torch.norm(grad))
+            for l in [cls_loss, reg_loss]:
+                g = torch.autograd.grad(l, self.weights, retain_graph=True, allow_unused=True)[0]
+                grads.append(torch.norm(g) if g is not None else torch.tensor(0.0, device=cls_loss.device))
 
-            # Oblicz współczynnik skalowania
-            avg_loss_ratio = torch.tensor([
-                (cls_loss / self.initial_losses[0]).item(),
-                (reg_loss / self.initial_losses[1]).item()
+            avg_loss_ratio = torch.stack([
+                cls_loss.detach() / (self.initial_losses[0] + 1e-8),
+                reg_loss.detach() / (self.initial_losses[1] + 1e-8),
             ])
-            avg_grad = sum(grads) / 2
-            target_grads = self.alpha * avg_loss_ratio * avg_grad
+            avg_grad = (grads[0] + grads[1]) / 2
+            target_grads = (self.alpha * avg_loss_ratio * avg_grad).detach()
 
-            loss_gradnorm = torch.sum(torch.abs(grads - target_grads.detach()))
+            grads_tensor = torch.stack(grads)
+            loss_gradnorm = torch.sum(torch.abs(grads_tensor - target_grads))
             return weighted_loss + loss_gradnorm
 
         elif self.method == "none":

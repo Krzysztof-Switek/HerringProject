@@ -1,6 +1,5 @@
 import os
 import torch
-from utils.population_mapper import PopulationMapper   # [DODANO] importujemy mappera
 
 class AugmentWrapper(torch.utils.data.Dataset):
     # ⬇️ [ZMIANA] Dodajemy population_mapper zamiast active_populations
