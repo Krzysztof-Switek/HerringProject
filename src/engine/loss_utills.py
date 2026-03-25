@@ -61,6 +61,14 @@ class SampleWeightedCrossEntropy(BaseMultitaskLossWrapper):
         mean_weight = sum(raw_map.values()) / len(raw_map)
         self.weight_map = {k: v / mean_weight for k, v in raw_map.items()}
 
+    def precompute_from_counts(self, class_counts):
+        """Precompute weight_map from full-dataset counts dict {(pop, wiek): count}."""
+        counts = {(int(pop), int(wiek)): cnt for (pop, wiek), cnt in class_counts.items() if cnt > 0}
+        total = sum(counts.values())
+        raw_map = {k: total / v for k, v in counts.items()}
+        mean_weight = sum(raw_map.values()) / len(raw_map)
+        self.weight_map = {k: v / mean_weight for k, v in raw_map.items()}
+
     def forward(self, outputs, targets, meta=None):
         outputs = self.unwrap_logits(outputs)
         loss = F.cross_entropy(outputs, targets, reduction='none')

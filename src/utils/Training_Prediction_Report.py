@@ -14,13 +14,14 @@ matplotlib.rcParams.update(MATPLOTLIB_DEFAULTS)
 
 class TrainingPredictionReport:
     def __init__(self, log_dir, config_path, predictions_path, metadata_path,
-                 metrics_path=None, augmentation_path=None):
+                 metrics_path=None, augmentation_path=None, loss_name=None):
         self.log_dir = Path(log_dir)
         self.config_path = Path(config_path)
         self.predictions_path = Path(predictions_path)
         self.metadata_path = Path(metadata_path)
         self.metrics_path = Path(metrics_path) if metrics_path else None
         self.augmentation_path = Path(augmentation_path) if augmentation_path else None
+        self.loss_name = loss_name
         self.metrics = None
         self.predictions = None
         self.metadata = None
@@ -149,7 +150,7 @@ class TrainingPredictionReport:
         elements.append(ReportText(f"<b>Podsumowanie treningu i predykcji</b>", getSampleStyleSheet()['Title'], spacer=12))
         elements.append(ReportText(f"Model: <b>{self.experiment_setup.get('Model', '-')}</b>"))
         elements.append(ReportText(f"Typ modelu: <b>{self.experiment_setup.get('Typ modelu', '-')}</b>"))
-        loss_name = self.log_dir.name.split("_")[1] if "_" in self.log_dir.name else self.experiment_setup.get("loss_type", "-")
+        loss_name = self.loss_name or self.experiment_setup.get("loss_type", "-")
         elements.append(ReportText(f"Funkcja straty: <b>{loss_name}</b>"))
         acc_str = str(self.best_metrics["Val Accuracy"]) if self.best_metrics else "-"
         elements.append(ReportText(f"Najlepszy accuracy (val): <b>{acc_str}</b>"))

@@ -22,6 +22,7 @@ def get_train_transform(cfg, mode: str | None = None):
     if resolved_mode == "base":
         return transforms.Compose([
             transforms.Resize(size),
+            transforms.CenterCrop(size),
             transforms.RandomHorizontalFlip(p=float(aug.hflip_prob)),
             transforms.RandomVerticalFlip(p=float(aug.vflip_prob)),
             transforms.ToTensor(),

@@ -1,14 +1,15 @@
 import sys
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parent.parent / "src"))
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
-from engine.trainer import Trainer
+from src.engine.trainer import Trainer
 
 if __name__ == "__main__":
     try:
-        project_root = Path(__file__).parent.parent
-        trainer = Trainer(project_root=project_root)
+        trainer = Trainer(project_root=_PROJECT_ROOT)
         trainer.train()
     except Exception as e:
         print(f"Error: {e}")

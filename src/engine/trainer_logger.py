@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-zimport csv
+import csv
 from pathlib import Path
 
 import torch

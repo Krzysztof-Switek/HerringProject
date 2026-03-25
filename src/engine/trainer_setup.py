@@ -177,6 +177,9 @@ def run_training_loop(trainer):
         )
         classification_loss = loss_factory.get()
 
+        if hasattr(classification_loss, 'precompute_from_counts'):
+            classification_loss.precompute_from_counts(trainer.data_loader.class_counts)
+
         if is_multitask:
             loss_fn = MultiTaskLossWrapper(
                 classification_loss=classification_loss,
@@ -332,6 +335,7 @@ def run_training_loop(trainer):
                     config_path=trainer.path_manager.config_path(),
                     predictions_path=predictions_path,
                     metadata_path=trainer.path_manager.metadata_file(),
+                    loss_name=loss_name,
                 )
                 report.run()
             except Exception as e:
