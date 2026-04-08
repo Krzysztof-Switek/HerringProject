@@ -285,10 +285,44 @@ def _compute_predictions_metrics(pred_df: pd.DataFrame) -> dict:
             age_valid = subset.dropna(subset=[age_col, "Wiek"])
             if len(age_valid) > 0:
                 errors = age_valid[age_col] - age_valid["Wiek"]
+                rounded_pred = age_valid[age_col].round().astype(int)
+                age_acc = round(float((rounded_pred == age_valid["Wiek"]).mean() * 100), 2)
+
+                # Per-age-group stats
+                per_age = {}
+                for true_age in sorted(age_valid["Wiek"].unique()):
+                    grp = age_valid[age_valid["Wiek"] == true_age]
+                    grp_err = grp[age_col] - grp["Wiek"]
+                    per_age[int(true_age)] = {
+                        "n": int(len(grp)),
+                        "mae": round(float(grp_err.abs().mean()), 2),
+                        "bias": round(float(grp_err.mean()), 2),
+                        "most_common_pred": int(grp[age_col].round().mode().iloc[0]),
+                    }
+
+                # Macierz pomylek wieku (true_age x rounded_pred_age)
+                all_ages = sorted(age_valid["Wiek"].unique())
+                pred_ages_unique = sorted(
+                    set(int(x) for x in age_valid[age_col].round())
+                )
+                all_age_labels = sorted(set(all_ages) | set(pred_ages_unique))
+                age_cm = []
+                for true_age in all_ages:
+                    grp = age_valid[age_valid["Wiek"] == true_age]
+                    row_vals = []
+                    for pa in all_age_labels:
+                        row_vals.append(int((grp[age_col].round().astype(int) == pa).sum()))
+                    age_cm.append(row_vals)
+
                 age_stats = {
                     "mae": round(float(errors.abs().mean()), 3),
                     "rmse": round(float((errors ** 2).mean() ** 0.5), 3),
                     "bias": round(float(errors.mean()), 3),
+                    "accuracy_rounded": age_acc,
+                    "per_age": per_age,
+                    "age_cm": age_cm,
+                    "age_cm_true_labels": [int(a) for a in all_ages],
+                    "age_cm_pred_labels": [int(a) for a in all_age_labels],
                 }
 
         results[split] = {
@@ -461,6 +495,130 @@ def _generate_multitask_loss_plots(
     return plots
 
 
+def _generate_age_plots(
+    emb_pred_df: pd.DataFrame | None,
+    not_pred_df: pd.DataFrame | None,
+) -> dict[str, str]:
+    """
+    Generuje wykresy analizy predykcji wieku:
+    - Scatter plot (predykcja vs prawda) osobno dla embedded i not_embedded
+    - Histogram bledow predykcji (bias distribution)
+    """
+    plots = {}
+
+    # --- Scatter plot ---
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig.suptitle("Predykcja wieku: wartosci przewidziane vs rzeczywiste",
+                 fontsize=13, fontweight="bold")
+
+    for ax, pred_df, model_label in [
+        (axes[0], emb_pred_df, "Embedded"),
+        (axes[1], not_pred_df, "Not-Embedded"),
+    ]:
+        if pred_df is None or pred_df.empty:
+            ax.set_title(f"{model_label} — brak danych")
+            continue
+
+        loss_name = _extract_loss_name(pred_df)
+        age_col = f"{loss_name}_age_pred" if loss_name else None
+        if age_col is None or age_col not in pred_df.columns or "Wiek" not in pred_df.columns:
+            ax.set_title(f"{model_label} — brak kolumny age_pred")
+            continue
+
+        colors = {"train": "#aec7e8", "val": "#1f77b4", "test": "#d62728", "all": "#999"}
+        for split, color in [("train", "#aec7e8"), ("val", "#1f77b4"), ("test", "#d62728")]:
+            if "set" in pred_df.columns:
+                sub = pred_df[pred_df["set"] == split].dropna(subset=[age_col, "Wiek"])
+            else:
+                sub = pred_df.dropna(subset=[age_col, "Wiek"])
+            if len(sub) == 0:
+                continue
+            ax.scatter(sub["Wiek"], sub[age_col], alpha=0.35, s=12,
+                       color=color, label=split)
+
+        # Linia idealnej predykcji
+        all_ages = pred_df["Wiek"].dropna()
+        if len(all_ages) > 0:
+            age_min, age_max = int(all_ages.min()), int(all_ages.max())
+            ax.plot([age_min, age_max], [age_min, age_max],
+                    "k--", linewidth=1.2, label="idealna")
+
+        ax.set_title(f"{model_label}")
+        ax.set_xlabel("Wiek rzeczywisty (lata)")
+        ax.set_ylabel("Wiek przewidziany (lata)")
+        ax.legend(markerscale=2, fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plots["Scatter: wiek przewidziany vs rzeczywisty"] = _fig_to_base64(fig)
+
+    # --- Histogram bledow ---
+    fig2, axes2 = plt.subplots(1, 2, figsize=(12, 4))
+    fig2.suptitle("Rozklad bledow predykcji wieku (pred - prawda)",
+                  fontsize=13, fontweight="bold")
+
+    for ax, pred_df, model_label in [
+        (axes2[0], emb_pred_df, "Embedded"),
+        (axes2[1], not_pred_df, "Not-Embedded"),
+    ]:
+        if pred_df is None or pred_df.empty:
+            continue
+        loss_name = _extract_loss_name(pred_df)
+        age_col = f"{loss_name}_age_pred" if loss_name else None
+        if age_col is None or age_col not in pred_df.columns:
+            continue
+
+        age_valid = pred_df.dropna(subset=[age_col, "Wiek"])
+        if len(age_valid) == 0:
+            continue
+
+        errors = age_valid[age_col] - age_valid["Wiek"]
+        ax.hist(errors, bins=30, color="#1f77b4", edgecolor="white", alpha=0.8)
+        ax.axvline(0, color="red", linestyle="--", linewidth=1.5, label="blad=0")
+        ax.axvline(float(errors.mean()), color="orange", linestyle="--",
+                   linewidth=1.5, label=f"srednia={errors.mean():.2f}")
+        ax.set_title(model_label)
+        ax.set_xlabel("Blad predykcji (lata)")
+        ax.set_ylabel("Liczba probek")
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plots["Histogram bledow predykcji wieku"] = _fig_to_base64(fig2)
+
+    # --- MAE per wiek ---
+    fig3, ax3 = plt.subplots(figsize=(11, 4))
+    fig3.suptitle("MAE predykcji wieku per grupa wiekowa",
+                  fontsize=13, fontweight="bold")
+
+    for pred_df, model_label, color in [
+        (emb_pred_df, "Embedded", "#1f77b4"),
+        (not_pred_df, "Not-Embedded", "#ff7f0e"),
+    ]:
+        if pred_df is None or pred_df.empty:
+            continue
+        loss_name = _extract_loss_name(pred_df)
+        age_col = f"{loss_name}_age_pred" if loss_name else None
+        if age_col is None or age_col not in pred_df.columns:
+            continue
+        age_valid = pred_df.dropna(subset=[age_col, "Wiek"])
+        if len(age_valid) == 0:
+            continue
+        ages = sorted(age_valid["Wiek"].unique())
+        maes = [float(abs(age_valid[age_valid["Wiek"] == a][age_col] - a).mean())
+                for a in ages]
+        ax3.plot(ages, maes, marker="o", label=model_label, color=color, linewidth=1.8)
+
+    ax3.set_xlabel("Wiek rzeczywisty (lata)")
+    ax3.set_ylabel("MAE (lata)")
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plots["MAE predykcji wieku per grupa wiekowa"] = _fig_to_base64(fig3)
+
+    return plots
+
+
 # ================================================================================
 # RAPORT HTML
 # ================================================================================
@@ -482,12 +640,204 @@ def _fmt(val, ref=None, higher_is_better=True, suffix=""):
     return f"<td{style}>{text}</td>"
 
 
+def _age_cm_html(age_stats: dict, label: str) -> str:
+    """Macierz pomylek dla predykcji wieku (true_age x rounded_pred_age)."""
+    cm = age_stats.get("age_cm")
+    true_labels = age_stats.get("age_cm_true_labels", [])
+    pred_labels = age_stats.get("age_cm_pred_labels", [])
+    if not cm or not true_labels:
+        return ""
+
+    header = "<tr><th>Prawda \\ Pred</th>" + "".join(
+        f"<th>{p}</th>" for p in pred_labels
+    ) + "</tr>"
+    body = ""
+    for i, true_age in enumerate(true_labels):
+        total = sum(cm[i])
+        cells = ""
+        for j, val in enumerate(cm[i]):
+            is_diag = (pred_labels[j] == true_age)
+            pct = f"<br><small>{val/total*100:.0f}%</small>" if total > 0 else ""
+            style = ' style="background:#d4edda; font-weight:bold;"' if is_diag else (
+                ' style="background:#f8d7da;"' if val > 0 else ""
+            )
+            cells += f"<td{style}>{val}{pct}</td>"
+        body += f"<tr><th>{true_age}</th>{cells}</tr>"
+
+    return f"""
+    <p style="margin-bottom:4px;"><b>Macierz pomylek wieku — {label}</b>
+    <small>(wiersze = wiek prawdziwy, kolumny = wiek przewidziany po zaokragleniu)</small></p>
+    <div style="overflow-x:auto;">
+    <table style="width:auto; font-size:0.85em;">
+    {header}{body}
+    </table></div>"""
+
+
+def _per_age_table_html(emb_age: dict, not_age: dict) -> str:
+    """Tabela MAE/bias per grupa wiekowa — Embedded vs Not-Embedded."""
+    per_age_emb = emb_age.get("per_age", {})
+    per_age_not = not_age.get("per_age", {})
+    all_ages = sorted(set(list(per_age_emb.keys()) + list(per_age_not.keys())))
+    if not all_ages:
+        return ""
+
+    rows = ""
+    for age in all_ages:
+        e = per_age_emb.get(age, {})
+        n = per_age_not.get(age, {})
+        e_mae = e.get("mae")
+        n_mae = n.get("mae")
+        e_n = e.get("n", "-")
+        n_n = n.get("n", "-")
+        e_bias = e.get("bias")
+        n_bias = n.get("bias")
+        e_mode = e.get("most_common_pred", "-")
+        n_mode = n.get("most_common_pred", "-")
+
+        # Pogrubienie lepszego MAE
+        def fmt_mae(val, ref):
+            if val is None:
+                return "<td>-</td>"
+            style = ' style="font-weight:bold; color:#1a7a1a;"' if (
+                ref is not None and val < ref
+            ) else ""
+            return f"<td{style}>{val}</td>"
+
+        rows += (
+            f"<tr><td>{age}</td>"
+            f"<td>{e_n}</td>{fmt_mae(e_mae, n_mae)}<td>{e_bias}</td><td>{e_mode}</td>"
+            f"<td>{n_n}</td>{fmt_mae(n_mae, e_mae)}<td>{n_bias}</td><td>{n_mode}</td>"
+            f"</tr>"
+        )
+
+    return f"""
+    <table style="font-size:0.9em;">
+    <tr>
+      <th rowspan="2">Wiek</th>
+      <th colspan="4" style="background:#dbeafe;">Embedded</th>
+      <th colspan="4" style="background:#fef3c7;">Not-Embedded</th>
+    </tr>
+    <tr>
+      <th style="background:#dbeafe;">N</th>
+      <th style="background:#dbeafe;">MAE</th>
+      <th style="background:#dbeafe;">Bias</th>
+      <th style="background:#dbeafe;">Najcz. pred.</th>
+      <th style="background:#fef3c7;">N</th>
+      <th style="background:#fef3c7;">MAE</th>
+      <th style="background:#fef3c7;">Bias</th>
+      <th style="background:#fef3c7;">Najcz. pred.</th>
+    </tr>
+    {rows}
+    </table>"""
+
+
+def _build_age_section_html(
+    emb_pred_metrics: dict,
+    not_pred_metrics: dict,
+    row_fn,
+    age_plots: dict[str, str] | None = None,
+) -> str:
+    """Buduje cala sekcje HTML poswiecona predykcji wieku."""
+    section_title = '<h2 style="margin-top:2em; border-bottom:2px solid #ccc;">Regresja wieku (multitask)</h2>'
+
+    # Tabela podsumowujaca metryki wieku per split
+    splits_order = [("all", "Caly zbior"), ("test", "Test"), ("val", "Walidacja")]
+    summary_rows = ""
+    for split_key, split_label in splits_order:
+        emb_s = emb_pred_metrics.get(split_key, {})
+        not_s = not_pred_metrics.get(split_key, {})
+        ea = emb_s.get("age", {})
+        na = not_s.get("age", {})
+        if not ea and not na:
+            continue
+        summary_rows += f'<tr><td><b>{split_label}</b></td>'
+        summary_rows += f'<td>{ea.get("mae", "-")}</td>'
+        summary_rows += f'<td>{ea.get("rmse", "-")}</td>'
+        summary_rows += f'<td>{ea.get("bias", "-")}</td>'
+        summary_rows += f'<td>{ea.get("accuracy_rounded", "-")}%</td>'
+        summary_rows += f'<td>{na.get("mae", "-")}</td>'
+        summary_rows += f'<td>{na.get("rmse", "-")}</td>'
+        summary_rows += f'<td>{na.get("bias", "-")}</td>'
+        summary_rows += f'<td>{na.get("accuracy_rounded", "-")}%</td>'
+        summary_rows += '</tr>'
+
+    if not summary_rows:
+        return ""
+
+    summary_table = f"""
+    <table style="font-size:0.9em;">
+    <tr>
+      <th rowspan="2">Zbior</th>
+      <th colspan="4" style="background:#dbeafe;">Embedded</th>
+      <th colspan="4" style="background:#fef3c7;">Not-Embedded</th>
+    </tr>
+    <tr>
+      <th style="background:#dbeafe;">MAE</th>
+      <th style="background:#dbeafe;">RMSE</th>
+      <th style="background:#dbeafe;">Bias</th>
+      <th style="background:#dbeafe;">Acc (zaokr.)</th>
+      <th style="background:#fef3c7;">MAE</th>
+      <th style="background:#fef3c7;">RMSE</th>
+      <th style="background:#fef3c7;">Bias</th>
+      <th style="background:#fef3c7;">Acc (zaokr.)</th>
+    </tr>
+    {summary_rows}
+    </table>
+    <p style="font-size:0.85em; color:#555;">
+    MAE = sredni blad bezwzgledny [lata] &nbsp;|&nbsp;
+    RMSE = pierwiastek ze sredniokwadratowego bledu &nbsp;|&nbsp;
+    Bias = systematyczne przeszacowanie (+) lub niedoszacowanie (-) &nbsp;|&nbsp;
+    Acc (zaokr.) = % trafnych predykcji po zaokragleniu do najblizszego roku
+    </p>"""
+
+    # Tabela per-wiek (caly zbior)
+    emb_all = emb_pred_metrics.get("all", {})
+    not_all = not_pred_metrics.get("all", {})
+    per_age_html = _per_age_table_html(emb_all.get("age", {}), not_all.get("age", {}))
+
+    # Macierze pomylek wieku (test + all)
+    cm_html_parts = []
+    for split_key, split_label in [("test", "Test"), ("all", "Caly zbior")]:
+        emb_s = emb_pred_metrics.get(split_key, {})
+        not_s = not_pred_metrics.get(split_key, {})
+        if emb_s.get("age", {}).get("age_cm") or not_s.get("age", {}).get("age_cm"):
+            cm_html_parts.append(f"<h3>Macierze pomylek wieku — {split_label}</h3>")
+            cm_html_parts.append('<div style="display:flex; gap:2em; flex-wrap:wrap;">')
+            cm_html_parts.append(f'<div>{_age_cm_html(emb_s.get("age", {}), "Embedded")}</div>')
+            cm_html_parts.append(f'<div>{_age_cm_html(not_s.get("age", {}), "Not-Embedded")}</div>')
+            cm_html_parts.append('</div>')
+            cm_html_parts.append('<hr style="margin:1.5em 0; border:1px solid #eee;">')
+
+    # Wykresy analizy wieku
+    age_plot_html = ""
+    if age_plots:
+        for plot_title, b64 in age_plots.items():
+            age_plot_html += (
+                f'<h3>{plot_title}</h3>'
+                f'<img src="data:image/png;base64,{b64}" '
+                f'style="max-width:100%; border:1px solid #ddd; border-radius:4px;"/>'
+            )
+
+    return f"""
+{section_title}
+<h3>Podsumowanie metryk regresji</h3>
+{summary_table}
+<hr style="margin:2em 0; border:1px solid #ccc;">
+<h3>Analiza per grupa wiekowa (caly zbior)</h3>
+{per_age_html if per_age_html else "<p><i>Brak danych.</i></p>"}
+<hr style="margin:2em 0; border:1px solid #ccc;">
+{"".join(cm_html_parts)}
+{age_plot_html}
+"""
+
+
 def _write_comparison_html(
     emb_best: dict,
     not_best: dict,
     emb_pred_metrics: dict,
     not_pred_metrics: dict,
     plots: dict[str, str],
+    age_plots: dict[str, str],
     emb_log_dir: Path | None,
     not_log_dir: Path | None,
     timestamp: str,
@@ -643,6 +993,11 @@ def _write_comparison_html(
     h2 { color: #34495e; }
     """
 
+    # --- Sekcja analizy wieku ---
+    age_section_html = _build_age_section_html(
+        emb_pred_metrics, not_pred_metrics, row, age_plots
+    )
+
     html = f"""<!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -658,10 +1013,12 @@ def _write_comparison_html(
 {section("Metryki treningowe (CSV)")}
 {csv_table}
 
-{section("Metryki z predykcji na pelnym zbiorze (Predictions Excel)")}
-{pred_sections if pred_sections else "<p><i>Brak danych predictions Excel (nie znaleziono pliku lub brak kolumny 'set').</i></p>"}
+{section("Klasyfikacja populacji — predykcje na zbiorze danych")}
+{pred_sections if pred_sections else "<p><i>Brak danych predictions Excel.</i></p>"}
 
-{section("Wykresy porownawcze")}
+{age_section_html}
+
+{section("Wykresy porownawcze krzywych treningowych")}
 {plot_html if plot_html else "<p><i>Brak danych do wykresu.</i></p>"}
 
 {section("Katalogi wynikow")}
@@ -729,12 +1086,14 @@ def generate_comparison_report(
     # --- Wygeneruj wykresy ---
     plots = _generate_comparison_plots(emb_metrics_df, not_metrics_df)
     plots.update(_generate_multitask_loss_plots(emb_metrics_df, not_metrics_df))
+    age_plots = _generate_age_plots(emb_pred_df, not_pred_df)
 
     # --- HTML ---
     _write_comparison_html(
         emb_best, not_best,
         emb_pred_metrics, not_pred_metrics,
         plots,
+        age_plots,
         emb_log_dir, not_log_dir,
         timestamp,
     )
