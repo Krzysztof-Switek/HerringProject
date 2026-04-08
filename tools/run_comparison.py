@@ -112,10 +112,6 @@ def run_training(image_type: str) -> Path | None:
     cfg.data.root_dir = str(root.relative_to(PROJECT_ROOT)).replace("\\", "/")
     cfg.data.metadata_file = str(meta.relative_to(SRC_ROOT)).replace("\\", "/")
 
-    if cfg.training.get("stop_after_one_epoch", False):
-        print("WARN: stop_after_one_epoch=true w config - nadpisuje na false!")
-        cfg.training.stop_after_one_epoch = False
-
     tmp_config_path = TOOLS_DIR / f"_tmp_config_{image_type}.yaml"
     OmegaConf.save(cfg, tmp_config_path)
 
