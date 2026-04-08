@@ -134,15 +134,15 @@ class LDAMLoss(BaseMultitaskLossWrapper):
         super().__init__()
         m_list = 1.0 / torch.sqrt(torch.sqrt(torch.tensor(class_counts).float() + 1e-8))
         m_list = m_list * (max_m / m_list.max())
-        self.m_list = m_list
+        self.register_buffer("m_list", m_list)  # przenosi sie z modelem na GPU
         self.s = s
 
     def forward(self, outputs, targets, meta=None):
         outputs = self.unwrap_logits(outputs)
         index = torch.zeros_like(outputs, dtype=torch.bool)
         index.scatter_(1, targets.data.view(-1, 1), 1)
-        batch_m = torch.zeros_like(outputs).to(outputs.device)
-        batch_m[index] = self.m_list[targets].to(outputs.device)
+        batch_m = torch.zeros_like(outputs)
+        batch_m[index] = self.m_list[targets]  # m_list jest juz na wlasciwym device (bufor)
         outputs_m = outputs - batch_m
         return F.cross_entropy(self.s * outputs_m, targets)
 
@@ -221,8 +221,8 @@ class GHMLoss(BaseMultitaskLossWrapper):
         super().__init__()
         self.bins = bins
         self.momentum = momentum
-        self.edges = torch.linspace(0, 1, bins + 1)
-        self.acc_sum = torch.zeros(bins)
+        self.register_buffer("edges", torch.linspace(0, 1, bins + 1))
+        self.register_buffer("acc_sum", torch.zeros(bins))
 
     def forward(self, outputs, targets, meta=None):
         outputs = self.unwrap_logits(outputs)
@@ -242,14 +242,14 @@ class GHMLoss(BaseMultitaskLossWrapper):
 class SeesawLoss(BaseMultitaskLossWrapper):
     def __init__(self, class_counts, p=0.8):
         super().__init__()
-        self.class_counts = torch.tensor(class_counts).float()
+        self.register_buffer("class_counts", torch.tensor(class_counts).float())
         self.p = p
 
     def forward(self, outputs, targets, meta=None):
         outputs = self.unwrap_logits(outputs)
         logits = F.log_softmax(outputs, dim=1)
         bias_weights = self.class_counts[targets] ** self.p
-        loss = -logits[range(len(targets)), targets] * bias_weights.to(outputs.device)
+        loss = -logits[range(len(targets)), targets] * bias_weights
         return loss.mean()
 
 class MultiTaskLossWrapper(nn.Module):

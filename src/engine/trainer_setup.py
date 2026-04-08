@@ -236,6 +236,7 @@ def run_training_loop(trainer):
         trainer.best_acc = 0.0
         trainer.early_stop_counter = 0
         trainer.best_cm = None
+        trainer.data_loader.augment_applied.clear()  # reset per loss_type
         # --- BUG 3 FIX ---
         # last_model_path jest inicjalizowane w Trainer.__init__, ale nie jest resetowane
         # między kolejnymi funkcjami strat w tej pętli. Gdyby loss_N zapisał model,

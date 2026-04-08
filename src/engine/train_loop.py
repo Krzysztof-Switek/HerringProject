@@ -136,6 +136,8 @@ def train_epoch(model, device, dataloader, loss_fn, optimizer, population_mapper
 
         inputs = inputs.to(device)
         targets = targets.to(device)
+        meta = {k: v.to(device) if isinstance(v, torch.Tensor) else v
+                for k, v in meta.items()}
 
         optimizer.zero_grad()
         outputs = model(inputs)
@@ -221,6 +223,8 @@ def validate(model, device, dataloader, loss_fn, population_mapper):
             inputs, targets, meta = batch
             inputs = inputs.to(device)
             targets = targets.to(device)
+            meta = {k: v.to(device) if isinstance(v, torch.Tensor) else v
+                    for k, v in meta.items()}
 
             outputs = model(inputs)
             loss = loss_fn(outputs, targets, meta)
