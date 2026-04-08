@@ -200,36 +200,38 @@ def _load_predictions_df(log_dir: Path) -> pd.DataFrame | None:
 
 
 def _extract_loss_name(pred_df: pd.DataFrame) -> str | None:
-    """Wyciaga nazwe funkcji straty z nazw kolumn predictions."""
-    pred_cols = [c for c in pred_df.columns if c.endswith("_pred")
-                 and c not in ("ldam_pred",)]
-    if not pred_cols:
-        pred_cols = [c for c in pred_df.columns if c.endswith("_pred")]
+    """Wyciaga nazwe funkcji straty z nazw kolumn predictions.
+    Szuka kolumny {loss}_pred - wyklucza {loss}_age_pred.
+    """
+    pred_cols = [c for c in pred_df.columns
+                 if c.endswith("_pred") and not c.endswith("_age_pred")]
     return pred_cols[0][:-5] if pred_cols else None
 
 
 def _compute_predictions_metrics(pred_df: pd.DataFrame) -> dict:
     """
     Liczy metryki z predictions Excel per split (train/val/test):
-      - accuracy
-      - per-populacja accuracy
-      - age MAE (jezeli jest kolumna age_pred)
+      - accuracy, per-populacja accuracy
+      - confusion matrix (lista list)
+      - confidence stats (srednia, mediana, %>=80%, %<60%)
+      - age MAE i RMSE (jezeli multitask)
     """
     loss_name = _extract_loss_name(pred_df)
     if loss_name is None:
         return {}
 
     pred_col = f"{loss_name}_pred"
+    prob_col = f"{loss_name}_prob"
     age_col = f"{loss_name}_age_pred"
 
     results = {}
-    splits = pred_df["set"].dropna().unique() if "set" in pred_df.columns else []
 
-    for split in ["train", "val", "test"]:
-        if "set" in pred_df.columns:
+    for split in ["train", "val", "test", "all"]:
+        if split == "all":
+            subset = pred_df.copy()
+        elif "set" in pred_df.columns:
             subset = pred_df[pred_df["set"] == split].copy()
         elif split == "val":
-            # Brak kolumny set - traktuj calosc jako val (fallback)
             subset = pred_df.copy()
         else:
             continue
@@ -244,28 +246,59 @@ def _compute_predictions_metrics(pred_df: pd.DataFrame) -> dict:
         if len(valid) == 0:
             continue
 
+        all_pops = sorted(pred_df["Populacja"].dropna().unique())
+
         acc = (valid[pred_col] == valid["Populacja"]).mean() * 100
 
         per_class = {}
-        for pop in sorted(valid["Populacja"].unique()):
+        for pop in all_pops:
             pop_sub = valid[valid["Populacja"] == pop]
-            per_class[int(pop)] = round(
-                (pop_sub[pred_col] == pop_sub["Populacja"]).mean() * 100, 2
-            )
+            if len(pop_sub) > 0:
+                per_class[int(pop)] = round(
+                    (pop_sub[pred_col] == pop_sub["Populacja"]).mean() * 100, 2
+                )
 
-        age_mae = None
+        # Macierz pomylek
+        cm = []
+        for true_pop in all_pops:
+            row = []
+            true_sub = valid[valid["Populacja"] == true_pop]
+            for pred_pop in all_pops:
+                row.append(int((true_sub[pred_col] == pred_pop).sum()))
+            cm.append(row)
+
+        # Statystyki pewnosci predykcji
+        conf_stats = {}
+        if prob_col in valid.columns:
+            probs = valid[prob_col].dropna()
+            if len(probs) > 0:
+                conf_stats = {
+                    "mean": round(float(probs.mean()), 1),
+                    "median": round(float(probs.median()), 1),
+                    "pct_high": round(float((probs >= 80).mean() * 100), 1),
+                    "pct_low": round(float((probs < 60).mean() * 100), 1),
+                }
+
+        # Age regression (multitask)
+        age_stats = {}
         if age_col in subset.columns and "Wiek" in subset.columns:
             age_valid = subset.dropna(subset=[age_col, "Wiek"])
             if len(age_valid) > 0:
-                age_mae = round(
-                    float(abs(age_valid[age_col] - age_valid["Wiek"]).mean()), 3
-                )
+                errors = age_valid[age_col] - age_valid["Wiek"]
+                age_stats = {
+                    "mae": round(float(errors.abs().mean()), 3),
+                    "rmse": round(float((errors ** 2).mean() ** 0.5), 3),
+                    "bias": round(float(errors.mean()), 3),
+                }
 
         results[split] = {
             "n": int(len(valid)),
             "accuracy": round(float(acc), 2),
             "per_class": per_class,
-            "age_mae": age_mae,
+            "cm": cm,
+            "cm_labels": [int(p) for p in all_pops],
+            "confidence": conf_stats,
+            "age": age_stats,
         }
 
     return results
@@ -284,9 +317,17 @@ def _load_best_val_metrics(metrics_df: pd.DataFrame) -> dict:
         col = next((c for c in metrics_df.columns if col_substr in c), None)
         return round(float(row[col]), 4) if col else None
 
+    # Sumaryczny czas treningu
+    time_col = next((c for c in metrics_df.columns if "Train Time" in c), None)
+    total_time_min = None
+    if time_col:
+        total_sec = metrics_df[time_col].sum()
+        total_time_min = round(total_sec / 60, 1)
+
     return {
         "best_epoch": int(row.get("epoch_num", idx + 1)),
         "total_epochs": len(metrics_df),
+        "total_time_min": total_time_min,
         "val_accuracy": _get("Val Accuracy"),
         "val_f1": _get("Val F1"),
         "val_precision": _get("Val Precision"),
@@ -474,6 +515,7 @@ def _write_comparison_html(
     <tr><th>Metryka (CSV — najlepsza epoka val)</th><th>Embedded</th><th>Not-Embedded</th></tr>
     {row("Najlepsza epoka", emb_e("best_epoch"), not_e("best_epoch"), higher=False)}
     {row("Liczba epok", emb_e("total_epochs"), not_e("total_epochs"), higher=False)}
+    {row("Czas treningu (min)", emb_e("total_time_min"), not_e("total_time_min"), higher=False)}
     {row("Val Accuracy (%)", emb_e("val_accuracy"), not_e("val_accuracy"), higher=True, suffix="%")}
     {row("Val F1", emb_e("val_f1"), not_e("val_f1"), higher=True)}
     {row("Val Precision", emb_e("val_precision"), not_e("val_precision"), higher=True)}
@@ -486,17 +528,38 @@ def _write_comparison_html(
     </table>
     """
 
-    # --- Tabele per split z predictions Excel ---
-    def pred_split_section(split_label, split_key):
-        emb_s = emb_pred_metrics.get(split_key, {})
-        not_s = not_pred_metrics.get(split_key, {})
+    def _cm_html(s: dict, label: str) -> str:
+        """Generuje macierz pomylek jako HTML table."""
+        cm = s.get("cm")
+        labels = s.get("cm_labels", [])
+        if not cm or not labels:
+            return ""
+        header = "<tr><th>True \\ Pred</th>" + "".join(f"<th>Pop {p}</th>" for p in labels) + "</tr>"
+        body = ""
+        for i, true_pop in enumerate(labels):
+            total = sum(cm[i])
+            cells = ""
+            for j, val in enumerate(cm[i]):
+                pct = f" ({val/total*100:.0f}%)" if total > 0 else ""
+                style = ' style="background:#d4edda;"' if i == j else ' style="background:#f8d7da;"'
+                cells += f"<td{style}>{val}{pct}</td>"
+            body += f"<tr><th>Pop {true_pop}</th>{cells}</tr>"
+        return f"""
+        <p><b>Macierz pomylek — {label}</b></p>
+        <table style="width:auto; margin-bottom:0.5em;">
+        {header}{body}
+        </table>"""
 
-        def prow(label, key, higher=True, suffix=""):
+    # --- Tabele per split z predictions Excel ---
+    def pred_split_section(s_label, s_key):
+        emb_s = emb_pred_metrics.get(s_key, {})
+        not_s = not_pred_metrics.get(s_key, {})
+
+        def prow(lbl, key, higher=True, suffix=""):
             e_v = emb_s.get(key)
             n_v = not_s.get(key)
-            return row(label, e_v, n_v, higher=higher, suffix=suffix)
+            return row(lbl, e_v, n_v, higher=higher, suffix=suffix)
 
-        # Per-class accuracy
         all_pops = sorted(set(
             list(emb_s.get("per_class", {}).keys()) +
             list(not_s.get("per_class", {}).keys())
@@ -507,28 +570,49 @@ def _write_comparison_html(
             n_pc = not_s.get("per_class", {}).get(pop)
             per_class_rows += row(f"Acc Populacja {pop} (%)", e_pc, n_pc, higher=True, suffix="%")
 
-        age_row = ""
-        if any("age_mae" in s for s in [emb_s, not_s]):
-            e_age = emb_s.get("age_mae")
-            n_age = not_s.get("age_mae")
-            age_row = row("Age MAE (lata)", e_age, n_age, higher=False)
+        age_stats_rows = ""
+        if emb_s.get("age") or not_s.get("age"):
+            e_age = emb_s.get("age", {})
+            n_age = not_s.get("age", {})
+            age_stats_rows += row("Age MAE (lata)", e_age.get("mae"), n_age.get("mae"), higher=False)
+            age_stats_rows += row("Age RMSE (lata)", e_age.get("rmse"), n_age.get("rmse"), higher=False)
+            age_stats_rows += row("Age bias (lata)", e_age.get("bias"), n_age.get("bias"), higher=False)
+
+        conf_rows = ""
+        if emb_s.get("confidence") or not_s.get("confidence"):
+            e_c = emb_s.get("confidence", {})
+            n_c = not_s.get("confidence", {})
+            conf_rows += row("Pewnosc srednia (%)", e_c.get("mean"), n_c.get("mean"), higher=True)
+            conf_rows += row("Wysoka pewnosc >=80% (%)", e_c.get("pct_high"), n_c.get("pct_high"), higher=True)
+            conf_rows += row("Niska pewnosc <60% (%)", e_c.get("pct_low"), n_c.get("pct_low"), higher=False)
 
         n_emb = emb_s.get("n", "-")
         n_not = not_s.get("n", "-")
 
         return f"""
-        <h3>{split_label} (N: Embedded={n_emb}, Not-Embedded={n_not})</h3>
+        <h3>{s_label} (N: Embedded={n_emb}, Not-Embedded={n_not})</h3>
         <table>
-        <tr><th>Metryka (Predictions Excel)</th><th>Embedded</th><th>Not-Embedded</th></tr>
+        <tr><th>Metryka</th><th>Embedded</th><th>Not-Embedded</th></tr>
         {prow("Accuracy (%)", "accuracy", higher=True, suffix="%")}
         {per_class_rows}
-        {age_row}
+        {age_stats_rows}
+        {conf_rows}
         </table>
+        <div style="display:flex; gap:2em; flex-wrap:wrap;">
+          <div>{_cm_html(emb_s, "Embedded")}</div>
+          <div>{_cm_html(not_s, "Not-Embedded")}</div>
+        </div>
         """
 
     pred_sections = ""
-    for split_key, split_label in [("test", "Test"), ("val", "Walidacja"), ("train", "Trening")]:
-        if (split_key in emb_pred_metrics or split_key in not_pred_metrics):
+    for split_key, split_label in [
+        ("all",   "Caly zbior (train + val + test)"),
+        ("test",  "Test"),
+        ("val",   "Walidacja"),
+        ("train", "Trening"),
+    ]:
+        if split_key in emb_pred_metrics or split_key in not_pred_metrics:
+            pred_sections += '<hr style="margin:2em 0; border:1px solid #ccc;">'
             pred_sections += pred_split_section(split_label, split_key)
 
     # --- Wykresy ---
@@ -635,8 +719,12 @@ def generate_comparison_report(
                 print(f"  {split.capitalize()} Acc (predictions): {s.get('accuracy')}%  (N={s.get('n')})")
                 for pop, acc in s.get("per_class", {}).items():
                     print(f"    Populacja {pop}: {acc}%")
-                if s.get("age_mae") is not None:
-                    print(f"  {split.capitalize()} Age MAE: {s.get('age_mae')} lat")
+                age = s.get("age", {})
+                if age.get("mae") is not None:
+                    print(f"  {split.capitalize()} Age MAE={age.get('mae')} RMSE={age.get('rmse')} bias={age.get('bias')}")
+                conf = s.get("confidence", {})
+                if conf:
+                    print(f"  {split.capitalize()} Confidence: mean={conf.get('mean')}% high={conf.get('pct_high')}% low={conf.get('pct_low')}%")
 
     # --- Wygeneruj wykresy ---
     plots = _generate_comparison_plots(emb_metrics_df, not_metrics_df)
@@ -662,7 +750,14 @@ def generate_comparison_report(
             s = pred_m.get(split, {})
             base[f"{split}_accuracy_pred"] = s.get("accuracy")
             base[f"{split}_n"] = s.get("n")
-            base[f"{split}_age_mae"] = s.get("age_mae")
+            age = s.get("age", {})
+            base[f"{split}_age_mae"] = age.get("mae")
+            base[f"{split}_age_rmse"] = age.get("rmse")
+            base[f"{split}_age_bias"] = age.get("bias")
+            conf = s.get("confidence", {})
+            base[f"{split}_conf_mean"] = conf.get("mean")
+            base[f"{split}_conf_pct_high"] = conf.get("pct_high")
+            base[f"{split}_conf_pct_low"] = conf.get("pct_low")
             for pop, acc in s.get("per_class", {}).items():
                 base[f"{split}_pop{pop}_accuracy"] = acc
         rows.append(base)

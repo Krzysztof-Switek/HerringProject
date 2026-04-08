@@ -11,10 +11,10 @@ def _extract_logits(outputs):
 
 def _safe_multiclass_auc(all_targets_idx, all_probs_matrix):
     """
-    Zwraca AUC multiclass, ale nie wysypuje epoki jeśli:
-    - pojawiła się tylko jedna klasa,
-    - macierz prawdopodobieństw ma zły kształt,
-    - sklearn zgłosi wyjątek.
+    Zwraca AUC. Rozroznia przypadek binarny i wieloklasowy:
+    - Binary (2 klasy): roc_auc_score(y_true, y_score[:, 1]) — wymaga 1D probs
+    - Multiclass (>2): roc_auc_score(y_true, y_score, multi_class="ovr") — wymaga 2D
+    Zwraca 0.0 jesli tylko jedna klasa w danych lub blad obliczen.
     """
     if not all_targets_idx or all_probs_matrix is None:
         return 0.0
@@ -30,8 +30,14 @@ def _safe_multiclass_auc(all_targets_idx, all_probs_matrix):
         return 0.0
 
     try:
-        return float(roc_auc_score(y_true, y_score, multi_class="ovr"))
-    except Exception:
+        n_classes = y_score.shape[1]
+        if n_classes == 2:
+            # Binary: roc_auc_score wymaga 1D (prob klasy pozytywnej)
+            return float(roc_auc_score(y_true, y_score[:, 1]))
+        else:
+            return float(roc_auc_score(y_true, y_score, multi_class="ovr"))
+    except Exception as e:
+        print(f"WARN: Blad obliczania AUC: {e}")
         return 0.0
 
 
