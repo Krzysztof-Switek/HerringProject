@@ -1,6 +1,11 @@
 data:
-  metadata_file: "data_loader/AnalysisWithOtolithPhoto_with_sets.xlsx"
-  root_dir: "data"
+  # metadata_file jest relatywna do src/ (rozwiazywana przez PathManager)
+  # Dostepne: metadata_embedded.xlsx | metadata_not_embedded.xlsx
+  metadata_file: "data_loader/metadata_embedded.xlsx"
+  # root_dir jest relatywny do katalogu projektu
+  # Embedded:     "data/embedded"
+  # Not-embedded: "data/not_embedded"
+  root_dir: "data/embedded"
   train: "train"
   val: "val"
   test: "test"
@@ -73,9 +78,9 @@ training:
     #- standard_ce
     #- sample_weighted_ce
     #- weighted_age_ce
-    - focal_loss_ageboost
+    #- focal_loss_ageboost
     - ldam
-  stop_after_one_epoch: true
+  stop_after_one_epoch: false
   epochs: 150
   learning_rate: 0.00001
   device: "auto"

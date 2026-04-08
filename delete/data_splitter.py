@@ -623,7 +623,7 @@ class DataSplitter:
 
 if __name__ == "__main__":
     splitter = DataSplitter(
-        base_dir="C:/Users/kswitek/Documents/HerringProject",
+        base_dir="/",
         source_subdir="final_pairs",
         train_ratio=0.7,
         val_ratio=0.2,

@@ -10,7 +10,7 @@ CEL:
 ETAPY:
   1  scan    — Skanuje dysk sieciowy, buduje pary Embedded+NotEmbedded, waliduje
                z katalogiem Raw. Wyjście: tools/processed_pairs.csv
-  2  copy    — Kopiuje pliki z sieci do final_pairs/{embedded,not_embedded}/{1,2}/
+  2  copy    — Kopiuje pliki z sieci do data/{embedded,not_embedded}/{1,2}/
                Wymaga dostępu do Z:/ Czyta populację z Excel.
   3  split   — Dzieli pary na train/val/test (grupowanie po fish_key = brak leakage,
                ten sam podział dla embedded i not_embedded).
@@ -49,10 +49,13 @@ PROJECT_ROOT = TOOLS_DIR.parent
 EXCEL_PATH = TOOLS_DIR / "analysisWithOtolithPhoto.xlsx"
 PAIRS_CSV = TOOLS_DIR / "processed_pairs.csv"
 
-# Katalog z wynikowymi danymi do treningu
-FINAL_PAIRS_DIR = PROJECT_ROOT / "final_pairs"
-EMBEDDED_ROOT = FINAL_PAIRS_DIR / "embedded"      # embedded/{1,2}/  + embedded/train/...
-NOT_EMBEDDED_ROOT = FINAL_PAIRS_DIR / "not_embedded"  # analogicznie
+# Katalog z danymi treningowymi (zgodnie z konwencja projektu data/ = dane do treningu)
+DATA_DIR = PROJECT_ROOT / "data"
+EMBEDDED_ROOT = DATA_DIR / "embedded"        # data/embedded/{1,2}/ + data/embedded/train/...
+NOT_EMBEDDED_ROOT = DATA_DIR / "not_embedded"  # analogicznie
+
+# Alias dla kompatybilnosci z raportami (etap 6)
+FINAL_PAIRS_DIR = DATA_DIR
 
 POPULATIONS = ["1", "2"]
 SPLITS = ["train", "val", "test"]
@@ -1079,6 +1082,150 @@ Oba katalogi maja identyczna strukture train/val/test/{{1,2}}/ z tymi samymi ryb
 
 
 # ================================================================================
+# ETAP 7 — GENEROWANIE METADATA DLA TRENINGU
+# ================================================================================
+
+# Gdzie pipeline treningowy spodziewa sie plikow metadata
+METADATA_EMB_DST = PROJECT_ROOT / "src" / "data_loader" / "metadata_embedded.xlsx"
+METADATA_NOT_DST = PROJECT_ROOT / "src" / "data_loader" / "metadata_not_embedded.xlsx"
+
+
+def step_generate_metadata():
+    """
+    Generuje dwa pliki Excel wymagane przez HerringDataset:
+      src/data_loader/metadata_embedded.xlsx    -- FileName, Populacja, Wiek
+      src/data_loader/metadata_not_embedded.xlsx -- FileName, Populacja, Wiek
+
+    Zrodla:
+      tools/analysisWithOtolithPhoto.xlsx  (FilePath/FileName, Populacja, Wiek per embedded image)
+      tools/processed_pairs.csv            (embedded_file_name <-> not_embedded_file_name)
+    """
+    sep("ETAP 7 — GENEROWANIE METADATA DLA TRENINGU")
+
+    if not EXCEL_PATH.exists():
+        raise FileNotFoundError(f"Brak pliku Excel: {EXCEL_PATH}")
+    if not PAIRS_CSV.exists():
+        raise FileNotFoundError(f"Brak pliku par: {PAIRS_CSV} — uruchom etap 1.")
+
+    # ---- Wczytaj zrodlowy Excel ------------------------------------------------
+    df_excel = pd.read_excel(EXCEL_PATH, engine="openpyxl")
+
+    # Znajdz kolumne z nazwa pliku (FilePath lub FileName)
+    fname_col = next(
+        (c for c in df_excel.columns if c.lower() in {"filepath", "filename"}), None
+    )
+    if fname_col is None:
+        raise ValueError(f"Brak kolumny FilePath/FileName w Excelu. Kolumny: {list(df_excel.columns)}")
+
+    pop_col = next(
+        (c for c in df_excel.columns if c.lower() == "populacja"), None
+    )
+    wiek_col = next(
+        (c for c in df_excel.columns if c.lower() == "wiek"), None
+    )
+    if pop_col is None or wiek_col is None:
+        raise ValueError("Brak kolumny Populacja lub Wiek w Excelu.")
+
+    # Buduj slownik: filename_lower -> (populacja, wiek)
+    emb_meta: dict[str, tuple[int, int]] = {}
+    for _, row in df_excel[[fname_col, pop_col, wiek_col]].iterrows():
+        fname = normalize_filename(row[fname_col])
+        if not fname:
+            continue
+        try:
+            pop = int(float(row[pop_col]))
+            wiek = int(float(row[wiek_col]))
+        except (ValueError, TypeError):
+            continue
+        emb_meta[fname] = (pop, wiek)
+
+    print(f"  Wczytano {len(emb_meta)} rekordow embedded z Excela")
+
+    # ---- Metadata EMBEDDED -----------------------------------------------------
+    # Filtruj do plikow ktore faktycznie sa w final_pairs/embedded/
+    emb_records = []
+    for pop in POPULATIONS:
+        d = EMBEDDED_ROOT / pop
+        if not d.exists():
+            continue
+        for f in d.iterdir():
+            if not f.is_file() or f.name.startswith("."):
+                continue
+            key = f.name.lower()
+            if key in emb_meta:
+                pop_val, wiek_val = emb_meta[key]
+                emb_records.append({
+                    "FileName": key,
+                    "Populacja": pop_val,
+                    "Wiek": wiek_val,
+                })
+
+    df_emb = pd.DataFrame(emb_records)
+    df_emb.drop_duplicates(subset=["FileName"], inplace=True)
+    METADATA_EMB_DST.parent.mkdir(parents=True, exist_ok=True)
+    df_emb.to_excel(METADATA_EMB_DST, index=False)
+    print(f"  metadata_embedded.xlsx: {len(df_emb)} rekordow -> {METADATA_EMB_DST}")
+
+    # ---- Metadata NOT_EMBEDDED -------------------------------------------------
+    # Dolacz populacje i wiek przez pary CSV
+    pairs_df = pd.read_csv(PAIRS_CSV, encoding="utf-8-sig")
+    pairs_df["emb_key"] = pairs_df["embedded_file_name"].apply(
+        lambda x: normalize_filename(x) or ""
+    )
+    pairs_df["not_key"] = pairs_df["not_embedded_file_name"].apply(
+        lambda x: normalize_filename(x) or ""
+    )
+
+    not_records = []
+    missing_meta = 0
+    for _, row in pairs_df.iterrows():
+        emb_key = row["emb_key"]
+        not_key = row["not_key"]
+        if not emb_key or not not_key:
+            continue
+        if emb_key not in emb_meta:
+            missing_meta += 1
+            continue
+        pop_val, wiek_val = emb_meta[emb_key]
+        not_records.append({
+            "FileName": not_key,
+            "Populacja": pop_val,
+            "Wiek": wiek_val,
+        })
+
+    df_not = pd.DataFrame(not_records)
+    df_not.drop_duplicates(subset=["FileName"], inplace=True)
+    df_not.to_excel(METADATA_NOT_DST, index=False)
+    print(f"  metadata_not_embedded.xlsx: {len(df_not)} rekordow -> {METADATA_NOT_DST}")
+
+    if missing_meta:
+        print(f"  WARN: {missing_meta} par bez metadanych embedded (brak populacji/wieku) — pominiete")
+
+    # ---- Walidacja cross-check --------------------------------------------------
+    # Sprawdz czy liczby pasuja do katalogow
+    for proc_name, dst, proc_root in [
+        ("embedded", METADATA_EMB_DST, EMBEDDED_ROOT),
+        ("not_embedded", METADATA_NOT_DST, NOT_EMBEDDED_ROOT),
+    ]:
+        files_in_dirs = sum(
+            1 for pop in POPULATIONS
+            for f in (proc_root / pop).iterdir()
+            if f.is_file() and not f.name.startswith(".")
+        ) if any((proc_root / pop).exists() for pop in POPULATIONS) else 0
+
+        df_check = pd.read_excel(dst, engine="openpyxl")
+        in_meta = len(df_check)
+        missing_from_meta = files_in_dirs - in_meta
+
+        status = "OK" if missing_from_meta == 0 else f"WARN: {missing_from_meta} plikow bez metadanych"
+        print(f"  {proc_name}: {files_in_dirs} plikow w katalogach, {in_meta} w metadata -> {status}")
+
+    print("\nOK: Pliki metadata gotowe. Mozna uruchomic trening.")
+    print(f"   Embedded:     {METADATA_EMB_DST}")
+    print(f"   Not-embedded: {METADATA_NOT_DST}")
+
+
+# ================================================================================
 # MAIN
 # ================================================================================
 
@@ -1090,18 +1237,19 @@ def main():
 Przykłady:
   python data_split_pipeline.py                   # wszystkie etapy (wymaga sieci Z:\\)
   python data_split_pipeline.py --steps 3 4       # split + weryfikacja (bez sieci)
-  python data_split_pipeline.py --steps 4         # tylko weryfikacja istniejących splitów
-  python data_split_pipeline.py --steps 3 --dry-run  # podgląd podziału bez kopiowania
+  python data_split_pipeline.py --steps 4         # tylko weryfikacja istniejacych splitow
+  python data_split_pipeline.py --steps 7         # tylko generuj metadata (bez sieci)
+  python data_split_pipeline.py --steps 3 --dry-run  # podglad bez kopiowania
         """,
     )
     parser.add_argument(
         "--steps",
         nargs="+",
         type=int,
-        choices=[1, 2, 3, 4, 5, 6],
-        default=[1, 2, 3, 4, 5, 6],
+        choices=[1, 2, 3, 4, 5, 6, 7],
+        default=[1, 2, 3, 4, 5, 6, 7],
         metavar="N",
-        help="Numery etapów do uruchomienia (1-6, domyślnie: wszystkie)",
+        help="Numery etapów do uruchomienia (1-7, domyślnie: wszystkie)",
     )
     parser.add_argument(
         "--dry-run",
@@ -1113,7 +1261,7 @@ Przykłady:
     steps = sorted(set(args.steps))
 
     print("=" * 72)
-    print("Pipeline przygotowania danych otolitów")
+    print("Pipeline przygotowania danych otolotów")
     print("=" * 72)
     print(f"  Etapy:       {steps}{'  [DRY RUN]' if args.dry_run else ''}")
     print(f"  TOOLS_DIR:   {TOOLS_DIR}")
@@ -1125,21 +1273,18 @@ Przykłady:
 
     if 1 in steps:
         pairs_df = step_scan()
-
     if 2 in steps:
         step_copy(pairs_df, dry_run=args.dry_run)
-
     if 3 in steps:
         step_split(pairs_df, dry_run=args.dry_run)
-
     if 4 in steps:
         step_verify()
-
     if 5 in steps:
         step_excel()
-
     if 6 in steps:
         step_report()
+    if 7 in steps:
+        step_generate_metadata()
 
     sep("GOTOWE")
     print(f"Uruchomione etapy: {steps}")

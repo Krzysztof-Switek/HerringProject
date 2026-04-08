@@ -1,0 +1,1 @@
+Epoch,Train Samples,Val Samples,Train Class 1 (idx 0),Train Class 2 (idx 1),Val Class 1 (idx 0),Val Class 2 (idx 1),Train Classification Loss,Val Classification Loss,Train Regression Loss,Val Regression Loss,Train Loss,Train Accuracy,Train Precision,Train Recall,Train F1,Train AUC,Val Loss,Val Accuracy,Val Precision,Val Recall,Val F1,Val AUC,Train Time (s)
