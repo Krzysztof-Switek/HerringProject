@@ -220,12 +220,16 @@ class TrainingPredictionReport:
         )
         doc.build(story)
 
-        # Usuwanie plików tymczasowych po wygenerowaniu PDF
+        # Zmiana nazw wykresow z tymczasowych na docelowe (bez prefiksu __)
         for plot_file in plot_files:
-            try:
-                Path(plot_file).unlink()
-            except Exception:
-                pass
+            plot_file = Path(plot_file)
+            if plot_file.exists() and plot_file.name.startswith("__temp_"):
+                final_name = plot_file.name[len("__temp_"):]
+                final_path = plot_file.parent / final_name
+                try:
+                    plot_file.rename(final_path)
+                except Exception:
+                    pass  # jesli plik docelowy juz istnieje, zostan z temp
 
         print(f"[REPORT] PDF zapisany: {pdf_path}")
 

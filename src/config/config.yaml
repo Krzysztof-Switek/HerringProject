@@ -1,10 +1,17 @@
+# ============================================================
+# KONFIGURACJA TRENINGU: Embedded vs Not-Embedded
+# Uruchamiaj przez: .venv\Scripts\python tools\run_comparison.py
+# run_comparison.py nadpisuje data.root_dir i data.metadata_file
+# automatycznie dla obu przebiegow (embedded / not_embedded).
+# ============================================================
+
 data:
-  # metadata_file jest relatywna do src/ (rozwiazywana przez PathManager)
-  # Dostepne: metadata_embedded.xlsx | metadata_not_embedded.xlsx
+  # Sciezki relatywne:
+  #   metadata_file -> wzgledem src/
+  #   root_dir      -> wzgledem katalogu projektu
+  # Embedded:     root_dir: "data/embedded"     | metadata_file: "data_loader/metadata_embedded.xlsx"
+  # Not-embedded: root_dir: "data/not_embedded" | metadata_file: "data_loader/metadata_not_embedded.xlsx"
   metadata_file: "data_loader/metadata_embedded.xlsx"
-  # root_dir jest relatywny do katalogu projektu
-  # Embedded:     "data/embedded"
-  # Not-embedded: "data/not_embedded"
   root_dir: "data/embedded"
   train: "train"
   val: "val"
@@ -12,6 +19,36 @@ data:
   batch_size: 32
   active_populations: [1, 2]
 
+# ============================================================
+# MODEL MULTITASKINGOWY (aktywny gdy use: true)
+# Backbone -> classifier_head (populacja) + regression_head (wiek)
+# ============================================================
+multitask_model:
+  use: true
+  backbone_model:
+    model_name: "resnet50"     # resnet50 | convnext_large | regnet_y_32gf | efficientnet_v2_l
+    image_size: 224            # resnet50: 224 | convnext_large/regnet: 384 | efficientnet: 480
+    pretrained: true
+    freeze_encoder: false
+    dropout_rate: 0.5
+    weight_decay: 0.01
+  classifier_head:
+    type: "linear"
+    dropout_rate: 0.5
+  regression_head:
+    type: "mlp"
+    hidden_dim: 128
+    dropout_rate: 0.3
+  loss_weighting:
+    method: "uncertainty"      # "none" | "static" | "uncertainty" | "gradnorm"
+    static:
+      classification: 1.0
+      age: 0.3
+  log_loss_components: true
+
+# ============================================================
+# MODEL KLASYFIKACYJNY (aktywny gdy multitask_model.use: false)
+# ============================================================
 base_model:
   base_model: "resnet50"
   image_size: 224
@@ -20,38 +57,9 @@ base_model:
   dropout_rate: 0.5
   weight_decay: 0.01
 
-expert_model:
-  use: false
-  base_model: "efficientnet_v2_l"
-  image_size: 480
-  pretrained: true
-  freeze_encoder: false
-  dropout_rate: 0.3
-  weight_decay: 0.01
-
-multitask_model:
-  use: true                         # Czy używać multitaskingu
-  backbone_model:                  # ARCHITEKTURA BACKBONE
-    model_name: "resnet50"
-    image_size: 224
-    pretrained: true
-    freeze_encoder: false
-    dropout_rate: 0.5
-    weight_decay: 0.01
-  classifier_head:
-    type: "linear"                  # Typ głowy klasyfikacyjnej
-    dropout_rate: 0.5
-  regression_head:
-    type: "mlp"                     # Typ głowy regresyjnej
-    hidden_dim: 128
-    dropout_rate: 0.3
-  loss_weighting:
-    method: "uncertainty"          # "static", "uncertainty", "gradnorm", "none"
-    static:
-      classification: 1.0
-      age: 0.3
-  log_loss_components: true
-
+# ============================================================
+# AUGMENTACJA DANYCH TRENINGOWYCH
+# ============================================================
 augmentation:
   mode: "strong"
   rotation: 30
@@ -68,56 +76,43 @@ augmentation:
   affine_shear: 10
   gaussian_blur_kernel: 3
 
+# ============================================================
+# PARAMETRY TRENINGU
+# ============================================================
 training:
   loss_type:
-    #- class_balanced_focal
-    #- focal_tversky
-    #- ghm
-    #- seesaw
-    #- asymmetric_focal
-    #- standard_ce
-    #- sample_weighted_ce
-    #- weighted_age_ce
-    #- focal_loss_ageboost
     - ldam
-  stop_after_one_epoch: false
+    # Dostepne: ldam | standard_ce | focal_loss_ageboost | class_balanced_focal
+    #           focal_tversky | ghm | seesaw | asymmetric_focal
+    #           sample_weighted_ce | weighted_age_ce
+  stop_after_one_epoch: true   # true = test pipeline (1 epoka) | false = pelny trening
   epochs: 150
   learning_rate: 0.00001
   device: "auto"
   early_stopping_patience: 5
-  checkpoint_dir: "checkpoints"           # miejsce zapisu modelu
+  checkpoint_dir: "checkpoints"
 
+# ============================================================
+# PREDYKCJA I WIZUALIZACJA STANDALONE
+# Nie uzywane podczas treningu. Uzywane przez src/predict.py, src/visualize.py.
+# Zaktualizuj model_path po treningu.
+# ============================================================
 prediction:
-  model_path: "checkpoints/convnext_large_03-06/convnext_large_ACC_82.61.pth"
-  image_path: "data/test/Głębia_Gdańska_0013_otsu_OBRYS_1.jpg"
+  model_path: "checkpoints/resnet50_ldam_multi/resnet50_ldam_ACC_XX.pth"
+  image_path: "data/embedded/test/1/example.jpg"
   results_dir: "results/gradcam"
   show_visualization: true
-  save_results: true                            # czy wyświetlać wykresy matplotlib
+  save_results: true
 
 prediction_modes:
-  #mode: "single"                                # "single" lub "batch"
-  #batch:
-   # num_images: 4                               # liczba obrazów do wyświetlenia w trybie batch
-   # min_confidence: 70                          # minimalna pewność predykcji dla obrazów w trybie batch
   navigation:
-    image_dir: "data/test"                      # katalog z obrazami do nawigacji w trybie single
-
+    image_dir: "data/embedded/test"
 
 visualization:
   methods: ['gradcam', 'gradcam++', 'guided_backprop']
   display_mode: 'matrix'
   matrix_cols: 3
   save_individual: False
-  target_layer: "base.features.8.0"           #resnet50:"base.layer4.2.conv3"; efficientnet:"base.features.8.0"
+  target_layer: "base.layer4.2.conv3"   # resnet50: "base.layer4.2.conv3" | efficientnet: "base.features.8.0"
   colormap: "jet"
   alpha: 0.5
-
-
-######################### ALTERNATYWNE MODELE ###########################
-#                                                                       #
-#  base_model: "convnext_large"                 # image_size: 384       #
-#  base_model: "vit_h_14"                       # image_size: 384       #
-#  base_model: "resnet50"                        # image_size: 224      #
-#  base_model: "regnet_y_32gf"                    # image_size: 384     #
-#               "efficientnet_v2_l"               # image_size: 480                                                        #
-######################### ALTERNATYWNE MODELE ###########################

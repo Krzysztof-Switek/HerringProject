@@ -13,8 +13,9 @@ from ..models.model import build_model
 from ..utils.population_mapper import PopulationMapper
 
 
-def _collect_all_image_paths(data_root: Path, active_populations) -> list[Path]:
-    image_paths: list[Path] = []
+def _collect_all_image_paths(data_root: Path, active_populations) -> list[tuple[Path, str]]:
+    """Returns list of (image_path, split_name) tuples."""
+    result: list[tuple[Path, str]] = []
 
     for split in ("train", "val", "test"):
         for pop in active_populations:
@@ -22,11 +23,10 @@ def _collect_all_image_paths(data_root: Path, active_populations) -> list[Path]:
             if not folder.exists():
                 continue
 
-            image_paths.extend(sorted(folder.glob("*.jpg")))
-            image_paths.extend(sorted(folder.glob("*.jpeg")))
-            image_paths.extend(sorted(folder.glob("*.png")))
+            for ext in ("*.jpg", "*.jpeg", "*.png"):
+                result.extend((p, split) for p in sorted(folder.glob(ext)))
 
-    return image_paths
+    return result
 
 
 def _prepare_metadata_dataframe(excel_path: Path) -> pd.DataFrame:
@@ -61,9 +61,10 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, l
     data_root = path_manager.data_root()
     all_image_paths = _collect_all_image_paths(data_root, population_mapper.active_populations)
 
-    predictions: dict[str, tuple[int | None, float | None, float | None]] = {}
+    # dict: filename_lower -> (pred_class, confidence, predicted_age, split)
+    predictions: dict[str, tuple[int | None, float | None, float | None, str]] = {}
 
-    for image_path in all_image_paths:
+    for image_path, split in all_image_paths:
         try:
             image = Image.open(image_path).convert("RGB")
             input_tensor = transform(image).unsqueeze(0).to(device)
@@ -90,6 +91,7 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, l
                 pred_class,
                 round(confidence, 2),
                 predicted_age,
+                split,
             )
 
         except Exception as exc:
@@ -102,21 +104,24 @@ def run_full_dataset_prediction(loss_name: str, model_path: str, path_manager, l
     pred_classes = []
     pred_probs = []
     pred_ages = []
+    pred_sets = []
     not_found = []
 
     for file_name in df["FileName"]:
         key = str(file_name).strip().lower()
-        pred = predictions.get(key, (None, None, None))
+        pred = predictions.get(key, (None, None, None, None))
         if pred[0] is None:
             not_found.append(key)
 
         pred_classes.append(pred[0])
         pred_probs.append(pred[1])
         pred_ages.append(pred[2])
+        pred_sets.append(pred[3])
 
     new_cols = pd.DataFrame({
         pred_column: pred_classes,
         prob_column: pred_probs,
+        "set": pred_sets,
     })
 
     if is_multitask:
