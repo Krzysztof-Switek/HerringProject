@@ -41,11 +41,11 @@ def _create_summary_writer(log_dir):
 
 def _import_loss_components():
     try:
-        from .loss_utills import LossFactory, MultiTaskLossWrapper
-        return LossFactory, MultiTaskLossWrapper
+        from .loss_utills import LossFactory, MultiTaskLossWrapper, WeightedMSELoss
+        return LossFactory, MultiTaskLossWrapper, WeightedMSELoss
     except ImportError:
-        from src.engine.loss_utills import LossFactory, MultiTaskLossWrapper
-        return LossFactory, MultiTaskLossWrapper
+        from src.engine.loss_utills import LossFactory, MultiTaskLossWrapper, WeightedMSELoss
+        return LossFactory, MultiTaskLossWrapper, WeightedMSELoss
 
 
 def _import_train_loop():
@@ -127,7 +127,7 @@ def _import_training_prediction_report():
 
 
 def run_training_loop(trainer):
-    LossFactory, MultiTaskLossWrapper = _import_loss_components()
+    LossFactory, MultiTaskLossWrapper, WeightedMSELoss = _import_loss_components()
     train_epoch, validate = _import_train_loop()
     run_full_dataset_prediction = _import_prediction_runner()
     build_model = _import_model_builder()
@@ -155,6 +155,7 @@ def run_training_loop(trainer):
     metadata = get_class_metadata(trainer)
     class_counts = metadata["class_counts"]
     class_freq = metadata["class_freq"]
+    age_counts = metadata["age_counts"]
 
     # --- BUG 1 FIX ---
     # weight_decay musi pochodzić z sekcji odpowiadającej aktywnemu modelowi.
@@ -183,7 +184,7 @@ def run_training_loop(trainer):
         if is_multitask:
             loss_fn = MultiTaskLossWrapper(
                 classification_loss=classification_loss,
-                regression_loss=torch.nn.MSELoss(),
+                regression_loss=WeightedMSELoss(age_counts),
                 method=trainer.cfg.multitask_model.loss_weighting.method,
                 static_weights=getattr(
                     trainer.cfg.multitask_model.loss_weighting,
@@ -278,9 +279,11 @@ def run_training_loop(trainer):
             )
 
             val_acc = val_metrics["acc"]
+            val_mae = val_metrics.get("age_mae", None)
             trainer, improved = save_best_model(
                 trainer,
                 val_acc,
+                val_mae,
                 val_metrics["cm"],
                 model_name,
                 loss_name,
@@ -294,7 +297,7 @@ def run_training_loop(trainer):
             if should_stop_early(trainer):
                 print(
                     f"🚍 Trening ({loss_name}) przerwany po {epoch + 1} epokach "
-                    f"z powodu braku poprawy ACC"
+                    f"z powodu braku poprawy metryki"
                 )
                 break
 

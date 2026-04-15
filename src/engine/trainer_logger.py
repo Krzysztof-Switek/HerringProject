@@ -116,10 +116,39 @@ def log_epoch_metrics(trainer, epoch, loss_name, train_metrics, val_metrics, epo
     ])
 
 
-def save_best_model(trainer, val_acc, val_cm, model_name, loss_name, checkpoint_dir):
-    if val_acc > trainer.best_acc:
+def save_best_model(trainer, val_acc, val_mae, val_cm, model_name, loss_name, checkpoint_dir):
+    """Zapisuje checkpoint gdy model się poprawia.
+
+    Tryb "combined" (domyślny): kryterium to combined_score łączący accuracy i MAE wieku:
+        combined = accuracy_weight * (1 - val_acc/100) + mae_weight * (val_mae / mae_reference)
+    Tryb "accuracy": zachowanie oryginalne — zapis gdy val_acc > best_acc.
+
+    Parametry trybu czytane z trainer.cfg.training.early_stopping_metric.
+    """
+    es_cfg = getattr(trainer.cfg.training, "early_stopping_metric", None)
+    mode = getattr(es_cfg, "mode", "accuracy") if es_cfg is not None else "accuracy"
+
+    if mode == "combined" and val_mae is not None:
+        acc_w = float(getattr(es_cfg, "accuracy_weight", 0.5))
+        mae_w = float(getattr(es_cfg, "mae_weight", 0.5))
+        mae_ref = float(getattr(es_cfg, "mae_reference", 3.0))
+
+        combined = acc_w * (1.0 - val_acc / 100.0) + mae_w * (val_mae / mae_ref)
+
+        if not hasattr(trainer, "best_combined_score"):
+            trainer.best_combined_score = float("inf")
+
+        improved = combined < trainer.best_combined_score
+        score_str = f"combined={combined:.4f} (acc={val_acc:.2f}%, mae={val_mae:.3f})"
+    else:
+        improved = val_acc > trainer.best_acc
+        score_str = f"acc={val_acc:.2f}%"
+
+    if improved:
         trainer.best_acc = val_acc
         trainer.best_cm = val_cm
+        if mode == "combined" and val_mae is not None:
+            trainer.best_combined_score = combined
 
         model_path = checkpoint_dir / f"{model_name}_{loss_name}_ACC_{val_acc:.2f}.pth"
         torch.save(trainer.model.state_dict(), model_path)
@@ -127,7 +156,7 @@ def save_best_model(trainer, val_acc, val_cm, model_name, loss_name, checkpoint_
         trainer.last_model_path = model_path
         trainer.early_stop_counter = 0
 
-        print(f"📂 Zapisano najlepszy model do: {model_path}")
+        print(f"📂 Zapisano najlepszy model ({score_str}): {model_path}")
         return trainer, True
 
     return trainer, False

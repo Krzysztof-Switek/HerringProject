@@ -252,6 +252,41 @@ class SeesawLoss(BaseMultitaskLossWrapper):
         loss = -logits[range(len(targets)), targets] * bias_weights
         return loss.mean()
 
+class WeightedMSELoss(nn.Module):
+    """MSELoss z wagami odwrotnie proporcjonalnymi do sqrt(liczebności klasy wiekowej).
+
+    Zapobiega dominacji klas wiekowych o dużej liczebności (np. wiek 4-6) nad
+    rzadkimi klasami (wiek 7+). Wagi obliczane są wyłącznie z danych treningowych.
+
+    Waga dla próbki: w(age) = 1 / sqrt(N_age), znormalizowana do średniej = 1.0.
+    """
+
+    def __init__(self, age_counts: dict):
+        """
+        age_counts: dict {wiek_int -> liczba_próbek} — obliczone z danych train only.
+        """
+        super().__init__()
+        if not age_counts:
+            self.register_buffer("weights", torch.ones(1))
+            self._fallback = True
+            return
+        self._fallback = False
+        max_age = max(int(a) for a in age_counts.keys()) + 1
+        weights = torch.ones(max_age)
+        for age, count in age_counts.items():
+            if count > 0:
+                weights[int(age)] = 1.0 / (count ** 0.5)
+        weights = weights / weights.mean()
+        self.register_buffer("weights", weights)
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        if self._fallback:
+            return F.mse_loss(pred, target)
+        target_int = target.long().clamp(0, len(self.weights) - 1)
+        w = self.weights[target_int]
+        return (w * (pred - target) ** 2).mean()
+
+
 class MultiTaskLossWrapper(nn.Module):
     def __init__(self, classification_loss, regression_loss, method="none", static_weights=None):
         super().__init__()

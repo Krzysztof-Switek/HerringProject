@@ -102,6 +102,33 @@ class HerringDataset:
         }
 
     def _compute_class_counts(self):
+        """Liczy klasy wyłącznie z katalogu train/ — zapobiega data leakage z val/test.
+
+        Skanuje fizyczne pliki w data/train/{pop}/ i uzupełnia wiek z metadanych.
+        Fallback do pełnych metadanych gdy katalog train/ nie istnieje (np. testy jednostkowe).
+        """
+        train_dir = self.path_manager.data_root() / "train"
+        if not train_dir.exists():
+            return self._compute_class_counts_all()
+
+        counter = Counter()
+        for pop in self.active_populations:
+            pop_dir = train_dir / str(pop)
+            if not pop_dir.exists():
+                continue
+            for img_file in pop_dir.iterdir():
+                if not img_file.is_file():
+                    continue
+                fname = img_file.name.lower()
+                entry = self.metadata.get(fname)
+                if entry is None:
+                    continue
+                _, wiek = entry
+                counter[(pop, wiek)] += 1
+        return counter
+
+    def _compute_class_counts_all(self):
+        """Fallback: liczy klasy ze wszystkich metadanych (używany tylko w testach)."""
         counter = Counter()
         for _file_name, (pop, wiek) in self.metadata.items():
             if pop in self.active_populations:

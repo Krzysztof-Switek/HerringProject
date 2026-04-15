@@ -90,6 +90,11 @@ training:
   learning_rate: 0.00001
   device: "auto"
   early_stopping_patience: 5
+  early_stopping_metric:
+    mode: "combined"       # "accuracy" | "combined"
+    accuracy_weight: 0.5   # waga dla (1 - val_acc/100), tylko przy mode="combined"
+    mae_weight: 0.5        # waga dla (val_mae / mae_reference), tylko przy mode="combined"
+    mae_reference: 3.0     # punkt odniesienia MAE [lata] — MAE modelu bez uczenia
   checkpoint_dir: "checkpoints"
 
 # ============================================================

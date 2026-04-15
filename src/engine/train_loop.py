@@ -202,6 +202,8 @@ def validate(model, device, dataloader, loss_fn, population_mapper):
     all_targets_idx = []
     all_preds_idx = []
     all_probs_matrix = []
+    all_age_preds = []
+    all_age_targets = []
 
     print(f"\n⏩ [validate] Start walidacji. Liczba batchy: {len(dataloader)}")
 
@@ -250,6 +252,13 @@ def validate(model, device, dataloader, loss_fn, population_mapper):
             all_preds_idx.extend(preds_np.tolist())
             all_probs_matrix.extend(probs_np.tolist())
 
+            # Zbieranie predykcji wieku dla modelu multitask
+            if isinstance(outputs, tuple) and len(outputs) == 2 and "wiek" in meta:
+                age_pred_np = outputs[1].squeeze().detach().cpu().numpy()
+                age_true_np = meta["wiek"].detach().cpu().numpy()
+                all_age_preds.extend(age_pred_np.tolist() if age_pred_np.ndim > 0 else [float(age_pred_np)])
+                all_age_targets.extend(age_true_np.tolist() if age_true_np.ndim > 0 else [float(age_true_np)])
+
     print("✅ [validate] Walidacja zakończona. Obliczam metryki...")
 
     result = _finalize_epoch_metrics(
@@ -261,11 +270,22 @@ def validate(model, device, dataloader, loss_fn, population_mapper):
         include_cm=True,
     )
 
-    print(
-        f"    [validate] Loss: {result['loss']:.4f} | "
-        f"Acc: {result['acc']:.2f}% | "
-        f"F1: {result['f1']:.3f} | "
-        f"AUC: {result['auc']:.3f}"
-    )
+    if all_age_preds:
+        age_mae = float(np.mean(np.abs(np.array(all_age_preds) - np.array(all_age_targets))))
+        result["age_mae"] = age_mae
+        print(
+            f"    [validate] Loss: {result['loss']:.4f} | "
+            f"Acc: {result['acc']:.2f}% | "
+            f"F1: {result['f1']:.3f} | "
+            f"AUC: {result['auc']:.3f} | "
+            f"Age MAE: {age_mae:.3f} lat"
+        )
+    else:
+        print(
+            f"    [validate] Loss: {result['loss']:.4f} | "
+            f"Acc: {result['acc']:.2f}% | "
+            f"F1: {result['f1']:.3f} | "
+            f"AUC: {result['auc']:.3f}"
+        )
 
     return result

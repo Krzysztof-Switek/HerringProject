@@ -433,6 +433,62 @@ def step_copy(pairs_df: pd.DataFrame | None = None, dry_run: bool = False):
 # ETAP 3 — PODZIAŁ NA TRAIN / VAL / TEST
 # ================================================================================
 
+AGE_BINS = [
+    ("young",  range(1, 4)),   # wiek 1–3
+    ("middle", range(4, 7)),   # wiek 4–6
+    ("old",    range(7, 100)), # wiek 7+
+]
+
+
+def _age_bin(wiek: int) -> str:
+    """Przypisuje wiek do jednego z trzech binów: young / middle / old."""
+    for name, r in AGE_BINS:
+        if wiek in r:
+            return name
+    return "old"
+
+
+def _load_age_lookup() -> dict[str, int]:
+    """
+    Czyta Excel i zwraca mapę: filename_lowercase -> wiek (int).
+    Używa tej samej logiki co _load_population_lookup().
+    """
+    if not EXCEL_PATH.exists():
+        raise FileNotFoundError(
+            f"Brak pliku Excel: {EXCEL_PATH}\n"
+            "Przenieś analysisWithOtolithPhoto.xlsx do tools/"
+        )
+    df = pd.read_excel(EXCEL_PATH, engine="openpyxl")
+
+    fname_col = next(
+        (c for c in df.columns if c.lower() in {"filepath", "filename", "embedded_file_path", "file_path", "file_name"}),
+        None,
+    )
+    wiek_col = next(
+        (c for c in df.columns if c.lower() == "wiek"),
+        None,
+    )
+    if fname_col is None:
+        raise ValueError(f"Brak kolumny z nazwą pliku w Excelu. Kolumny: {list(df.columns)}")
+    if wiek_col is None:
+        raise ValueError(f"Brak kolumny Wiek w Excelu. Kolumny: {list(df.columns)}")
+
+    lookup: dict[str, int] = {}
+    for _, row in df[[fname_col, wiek_col]].dropna().iterrows():
+        fname = normalize_filename(row[fname_col])
+        if not fname:
+            continue
+        try:
+            wiek = int(float(row[wiek_col]))
+        except (ValueError, TypeError):
+            continue
+        if wiek > 0:
+            lookup[fname] = wiek
+
+    print(f"  Mapowanie wieku: {len(lookup)} plików, zakres wiek {min(lookup.values())}–{max(lookup.values())}")
+    return lookup
+
+
 def _build_filename_to_pop_map(process_root: Path) -> dict[str, str]:
     """
     Skanuje process_root/{1,2}/ i zwraca mapę: filename.lower() -> populacja.
@@ -508,31 +564,66 @@ def step_split(pairs_df: pd.DataFrame | None = None, dry_run: bool = False):
         lambda x: str(x).lower().strip() if pd.notna(x) else ""
     )
 
-    # Podział po fish_key — TEN SAM podział dla embedded i not_embedded
+    # Wczytaj wiek ryb z Excela i przypisz biny wiekowe
+    print("\nWczytywanie wieku ryb z Excela (stratyfikacja)...")
+    age_lookup = _load_age_lookup()
+    df["wiek"] = df["emb_fname"].map(age_lookup)
+    missing_age = df["wiek"].isna().sum()
+    if missing_age > 0:
+        print(f"  WARN: {missing_age} par bez informacji o wieku — przypisano bin 'middle'")
+        df["wiek"] = df["wiek"].fillna(5)
+    df["age_bin"] = df["wiek"].astype(int).apply(_age_bin)
+
+    bin_counts = df["age_bin"].value_counts().to_dict()
+    print(f"  Rozkład binów wiekowych (wszystkie pary): {dict(sorted(bin_counts.items()))}")
+
+    # Podział po fish_key stratyfikowany po (populacja, bin_wiekowy)
+    # TEN SAM podział dla embedded i not_embedded
     random.seed(SEED)
     group_assignments: dict[tuple[str, str], str] = {}  # (pop, fish_key_norm) -> split
+    age_bin_stats: dict[tuple[str, str, str], int] = {}  # (pop, bin, split) -> liczba ryb
 
-    print("\nPodział ryb na grupy:")
+    print("\nPodział ryb na grupy (stratyfikowany po populacji × bin wiekowy):")
     for pop in POPULATIONS:
-        pop_df = df[df["pop"] == pop]
-        fish_keys = sorted(pop_df["fish_key_norm"].dropna().unique().tolist())
-        random.shuffle(fish_keys)
+        pop_df = df[df["pop"] == pop].copy()
+        total_assigned = 0
 
-        n = len(fish_keys)
-        n_train = int(n * TRAIN_RATIO)
-        n_val = int(n * VAL_RATIO)
+        for bin_name, _ in AGE_BINS:
+            bin_df = pop_df[pop_df["age_bin"] == bin_name]
+            fish_keys = sorted(bin_df["fish_key_norm"].dropna().unique().tolist())
+            random.shuffle(fish_keys)
 
-        for i, k in enumerate(fish_keys):
-            if i < n_train:
-                split = "train"
-            elif i < n_train + n_val:
-                split = "val"
-            else:
-                split = "test"
-            group_assignments[(pop, k)] = split
+            n = len(fish_keys)
+            n_train = int(n * TRAIN_RATIO)
+            n_val = int(n * VAL_RATIO)
 
-        counts = Counter(group_assignments[(pop, k)] for k in fish_keys)
-        print(f"  Populacja {pop}: {n} ryb "
+            for i, k in enumerate(fish_keys):
+                if i < n_train:
+                    split = "train"
+                elif i < n_train + n_val:
+                    split = "val"
+                else:
+                    split = "test"
+                group_assignments[(pop, k)] = split
+
+            bin_counts_per_split = Counter(
+                group_assignments[(pop, k)] for k in fish_keys
+            )
+            age_bin_stats[(pop, bin_name, "train")] = bin_counts_per_split["train"]
+            age_bin_stats[(pop, bin_name, "val")] = bin_counts_per_split["val"]
+            age_bin_stats[(pop, bin_name, "test")] = bin_counts_per_split["test"]
+            total_assigned += n
+            print(f"  Pop {pop} / {bin_name}: {n} ryb "
+                  f"-> train={bin_counts_per_split['train']}, "
+                  f"val={bin_counts_per_split['val']}, "
+                  f"test={bin_counts_per_split['test']}")
+
+        counts = Counter(
+            group_assignments[(pop, k)]
+            for k in pop_df["fish_key_norm"].dropna().unique()
+            if (pop, k) in group_assignments
+        )
+        print(f"  Pop {pop} RAZEM: {total_assigned} ryb "
               f"-> train={counts['train']}, val={counts['val']}, test={counts['test']}")
 
     # Wyczyść stare katalogi splitów (NIE ruszaj 1/ i 2/ — to źródła)
@@ -597,7 +688,99 @@ def step_split(pairs_df: pd.DataFrame | None = None, dry_run: bool = False):
     if not no_split_count and not missing_src_count:
         print("\nOK: Podział zakończony bez błędów.")
 
+    if not dry_run:
+        _write_split_info_md(age_bin_stats, stats, group_assignments)
+
     return group_assignments
+
+
+def _write_split_info_md(
+    age_bin_stats: dict,
+    file_stats: dict,
+    group_assignments: dict,
+):
+    """Generuje data/split_info.md z opisem stratyfikowanego podziału."""
+    from datetime import date
+
+    today = date.today().isoformat()
+
+    # Tabela: pop × bin × split (ryby)
+    bin_rows = ""
+    for pop in POPULATIONS:
+        for bin_name, age_range in AGE_BINS:
+            r_start = min(age_range)
+            r_end = max(age_range) if bin_name != "old" else "+"
+            tr = age_bin_stats.get((pop, bin_name, "train"), 0)
+            vl = age_bin_stats.get((pop, bin_name, "val"), 0)
+            te = age_bin_stats.get((pop, bin_name, "test"), 0)
+            total = tr + vl + te
+            bin_rows += f"| {pop} | {bin_name} ({r_start}–{r_end}) | {tr} | {vl} | {te} | {total} |\n"
+
+    # Tabela: split × pliki (obrazy)
+    file_rows = ""
+    for split in SPLITS:
+        emb = file_stats["embedded"][split]
+        not_emb = file_stats["not_embedded"][split]
+        file_rows += f"| {split} | {emb} | {not_emb} |\n"
+
+    report = f"""# Opis podziału danych — split_info
+
+Data wykonania: {today}
+Skrypt: `tools/data_split_pipeline.py`
+Proporcje: train={TRAIN_RATIO}, val={VAL_RATIO}, test={round(1 - TRAIN_RATIO - VAL_RATIO, 2)}
+Seed: {SEED}
+
+## Metoda podziału
+
+Podział jest wykonywany na poziomie ryby (`fish_key`), nie na poziomie obrazu.
+Gwarantuje to:
+- brak tej samej ryby w więcej niż jednym zbiorze (train/val/test)
+- identyczny podział dla zdjęć Embedded i Not-Embedded tej samej ryby
+
+### Stratyfikacja po wieku (zmiana względem poprzedniej wersji)
+
+Poprzednia wersja wykonywała `random.shuffle` wyłącznie w obrębie populacji,
+bez uwzględnienia wieku. Powodowało to losowy rozkład wiekowy w zbiorach,
+co skutkowało anomalią Test Accuracy > Val Accuracy (test set przypadkowo
+zawierał więcej łatwych, młodych ryb).
+
+Obecna wersja stratyfikuje ryby według kombinacji:
+**(populacja × bin wiekowy)** przed losowym tasowaniem.
+
+Biny wiekowe:
+| Bin | Zakres | Uzasadnienie |
+|-----|--------|--------------|
+| young | 1–3 lat | Rzadkie, pozytywny bias modelu |
+| middle | 4–6 lat | Dominujące w datasecie (~60% próbek) |
+| old | 7+ lat | Dramatycznie niedoreprezentowane, najgorzej przewidywane |
+
+Każdy bin jest tasowany i dzielony niezależnie, co zapewnia proporcjonalną
+reprezentację ryb w każdym wieku we wszystkich trzech zbiorach.
+
+## Rozkład ryb (fish_key) po podziale
+
+| Populacja | Bin wiekowy | Train | Val | Test | Razem |
+|-----------|-------------|-------|-----|------|-------|
+{bin_rows}
+## Liczba obrazów w zbiorach
+
+| Split | Embedded | Not-Embedded |
+|-------|----------|-------------|
+{file_rows}
+Każdy obraz Embedded ma dokładnie jeden odpowiednik Not-Embedded
+(ten sam otolith, różne metody preparacji).
+
+## Weryfikacja
+
+Po wykonaniu podziału uruchom etap 4 (`--steps 4`) aby sprawdzić:
+- równą liczbę plików Embedded i Not-Embedded w każdym split/pop
+- te same ryby w Embedded i Not-Embedded
+- brak leakage (ta sama ryba nie w więcej niż 1 zbiorze)
+"""
+
+    split_info_path = DATA_DIR / "split_info.md"
+    split_info_path.write_text(report, encoding="utf-8")
+    print(f"\nOK: Zapisano opis podziału: {split_info_path}")
 
 
 # ================================================================================
