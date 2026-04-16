@@ -19,7 +19,7 @@ data:
   batch_size: 32
   num_workers: 4              # 0 = single-threaded (wolne dla dużych obrazów embedded)
   active_populations: [1, 2]
-
+!!
 # ============================================================
 # MODEL MULTITASKINGOWY (aktywny gdy use: true)
 # Backbone -> classifier_head (populacja) + regression_head (wiek)
