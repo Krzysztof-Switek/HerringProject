@@ -41,6 +41,12 @@ class PathManager:
         filename = f"{model_name}_{date}_predictions.xlsx"
         return output_dir / filename
 
+    def gradcam_dir(self, run_name: str) -> Path:
+        base = self._resolve(self.cfg.prediction.results_dir)
+        out = base / run_name
+        out.mkdir(parents=True, exist_ok=True)
+        return out
+
     def _resolve(self, path_str: str, subdir: str | None = None) -> Path:
         path = Path(path_str)
         if path.is_absolute():
