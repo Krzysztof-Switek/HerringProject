@@ -35,6 +35,7 @@ class MultiTaskHerringModel(nn.Module):
     def _init_base_model(self):
         model_config = {
             "resnet50": {"classifier": "fc"},
+            "swin_v2_b": {"classifier": "head"},
             "convnext_large": {"classifier": "classifier"},
             #"vit_h_14": {"classifier": "heads"},
             "efficientnet_v2_l": {"classifier": "classifier"},
@@ -49,6 +50,7 @@ class MultiTaskHerringModel(nn.Module):
         if self.cfg.pretrained:
             weight_map = {
                 "resnet50": models.ResNet50_Weights.IMAGENET1K_V1,
+                "swin_v2_b": models.Swin_V2_B_Weights.IMAGENET1K_V1,
                 "efficientnet_v2_l": models.EfficientNet_V2_L_Weights.IMAGENET1K_V1,
                 "convnext_large": models.ConvNeXt_Large_Weights.IMAGENET1K_V1,
                 #"vit_h_14": models.ViT_H_14_Weights.IMAGENET1K_V1,

@@ -1,6 +1,6 @@
 # Raport przygotowania danych — Otolity Sledzia
 
-Data: 2026-04-08
+Data: 2026-04-15
 Skrypt: `tools/data_split_pipeline.py`
 
 
@@ -57,9 +57,9 @@ Podzial na poziomie ryby (fish_key) — brak leakage, ten sam podzial dla embedd
 
 | Split | Emb pop.1 | Emb pop.2 | Emb lacznie | NotEmb pop.1 | NotEmb pop.2 | NotEmb lacznie | Ryb pop.1 | Ryb pop.2 | Ryb lacznie |
 |-------|-----------|-----------|-------------|--------------|--------------|----------------|-----------|-----------|-------------|
-| train | 856 | 705 | 1561 | 856 | 705 | 1561 | 452 | 377 | 829 |
-| val   | 249 | 194 | 443 | 249 | 194 | 443 | 129 | 107 | 236 |
-| test  | 127 | 103 | 230 | 127 | 103 | 230 | 66 | 55 | 121 |
+| train | 863 | 699 | 1562 | 863 | 699 | 1562 | 451 | 376 | 827 |
+| val   | 243 | 199 | 442 | 243 | 199 | 442 | 129 | 107 | 236 |
+| test  | 126 | 104 | 230 | 126 | 104 | 230 | 67 | 56 | 123 |
 | **SUMA** | **1232** | **1002** | **2234** | **1232** | **1002** | **2234** | **647** | **539** | **1186** |
 
 Lacznie w final_pairs/: **4468 plikow** (2234 embedded + 2234 not_embedded w splitach)
@@ -72,12 +72,12 @@ final_pairs/
   embedded/
     1/  (1232 plikow)    not_embedded/1/  (1232 plikow)
     2/  (1002 plikow)                 2/  (1002 plikow)
-    train/1/ (856)  not_embedded/train/1/ (856)
-    train/2/ (705)               train/2/ (705)
-    val/1/   (249)                 val/1/   (249)
-    val/2/   (194)                 val/2/   (194)
-    test/1/  (127)                test/1/  (127)
-    test/2/  (103)                test/2/  (103)
+    train/1/ (863)  not_embedded/train/1/ (863)
+    train/2/ (699)               train/2/ (699)
+    val/1/   (243)                 val/1/   (243)
+    val/2/   (199)                 val/2/   (199)
+    test/1/  (126)                test/1/  (126)
+    test/2/  (104)                test/2/  (104)
 ```
 
 ---
@@ -100,8 +100,8 @@ Plik: `tools/analysisWithOtolithPhoto.xlsx` (14498 rekordow lacznie)
 
 | SET | Rekordow |
 |-----|---------|
-| TRAIN | 1561 |
-| VAL | 443 |
+| TRAIN | 1562 |
+| VAL | 442 |
 | TEST | 230 |
 | Bez SET (poza zbiorem treningowym) | 12264 |
 

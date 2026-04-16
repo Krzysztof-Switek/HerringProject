@@ -194,11 +194,12 @@ class HerringDataset:
             self.population_mapper,
         )
 
+        num_workers = int(self.cfg.data.get("num_workers", 0))
         train_loader = DataLoader(
             train_set,
             batch_size=self.cfg.data.batch_size,
             shuffle=True,
-            num_workers=0,
+            num_workers=num_workers,
             pin_memory=torch.cuda.is_available(),
         )
 
@@ -206,7 +207,7 @@ class HerringDataset:
             val_set,
             batch_size=self.cfg.data.batch_size,
             shuffle=False,
-            num_workers=0,
+            num_workers=num_workers,
             pin_memory=torch.cuda.is_available(),
         )
 

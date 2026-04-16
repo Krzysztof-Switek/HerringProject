@@ -16,6 +16,7 @@ class HerringModel(nn.Module):
     def _init_base_model(self) -> nn.Module:
         model_config = {
             "resnet50": {"image_size": 224, "classifier": "fc"},
+            "swin_v2_b": {"image_size": 256, "classifier": "head"},
             "convnext_large": {"image_size": 384, "classifier": "classifier"},
             "vit_h_14": {"image_size": 384, "classifier": "heads"},
             "efficientnet_v2_l": {"image_size": 480, "classifier": "classifier"},
@@ -36,6 +37,8 @@ class HerringModel(nn.Module):
                 weights = models.ConvNeXt_Large_Weights.IMAGENET1K_V1
             elif self.cfg.base_model == "vit_h_14":
                 weights = models.ViT_H_14_Weights.IMAGENET1K_V1
+            elif self.cfg.base_model == "swin_v2_b":
+                weights = models.Swin_V2_B_Weights.IMAGENET1K_V1
             elif self.cfg.base_model == "regnet_y_32gf":
                 weights = models.RegNet_Y_32GF_Weights.IMAGENET1K_V1
             else:
