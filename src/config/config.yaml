@@ -27,8 +27,8 @@ data:
 multitask_model:
   use: true
   backbone_model:
-    model_name: "efficientnet_v2_l"  # resnet50: 224 | swin_v2_b: 256 | convnext_large/regnet: 384 | efficientnet_v2_l: 480
-    image_size: 480                  # resnet50: 224 | swin_v2_b: 256 | convnext_large/regnet: 384 | efficientnet: 480
+    model_name: "swin_v2_b"    # resnet50: 224 | swin_v2_b: 256 | convnext_large/regnet: 384 | efficientnet_v2_l: 480
+    image_size: 256            # resnet50: 224 | swin_v2_b: 256 | convnext_large/regnet: 384 | efficientnet: 480
     pretrained: true
     freeze_encoder: false
     dropout_rate: 0.5
@@ -86,7 +86,7 @@ training:
     # Dostepne: ldam | standard_ce | focal_loss_ageboost | class_balanced_focal
     #           focal_tversky | ghm | seesaw | asymmetric_focal
     #           sample_weighted_ce | weighted_age_ce
-  stop_after_one_epoch: false  # true = test pipeline (1 epoka) | false = pelny trening
+  stop_after_one_epoch: true   # true = test pipeline (1 epoka) | false = pelny trening
   epochs: 150
   learning_rate: 0.00001
   device: "auto"
