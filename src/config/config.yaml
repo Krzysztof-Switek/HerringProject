@@ -22,7 +22,7 @@ data:
   active_populations: [1, 2]
 
 # ============================================================
-# ARCHITEKTURA MODELU
+# ARCHITEKTURA MODELU poprawiona
 #
 # Przełącznik trybu:
 #   multitask_model.use: true  → MultiTaskHerringModel (klasyfikacja populacji + regresja wieku)
