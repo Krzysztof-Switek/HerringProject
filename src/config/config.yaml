@@ -1,14 +1,15 @@
 # ============================================================
-# KONFIGURACJA TRENINGU: Embedded vs Not-Embedded
+# KONFIGURACJA TRENINGU
 # Uruchamiaj przez: .venv\Scripts\python tools\run_comparison.py
 # run_comparison.py nadpisuje data.root_dir i data.metadata_file
-# automatycznie dla obu przebiegow (embedded / not_embedded).
+# automatycznie dla obu przebiegów (embedded / not_embedded).
 # ============================================================
 
+# ============================================================
+# DANE
+# ============================================================
 data:
-  # Sciezki relatywne:
-  #   metadata_file -> wzgledem src/
-  #   root_dir      -> wzgledem katalogu projektu
+  # Wartości poniżej są nadpisywane przez run_comparison.py — nie zmieniaj ręcznie.
   # Embedded:     root_dir: "data/embedded"     | metadata_file: "data_loader/metadata_embedded.xlsx"
   # Not-embedded: root_dir: "data/not_embedded" | metadata_file: "data_loader/metadata_not_embedded.xlsx"
   metadata_file: "data_loader/metadata_embedded.xlsx"
@@ -17,42 +18,48 @@ data:
   val: "val"
   test: "test"
   batch_size: 32
-  num_workers: 4              # 0 = single-threaded (wolne dla dużych obrazów embedded)
+  num_workers: 4        # 0 = single-threaded (wolne dla dużych obrazów embedded), 4 = równoległe ładowanie
   active_populations: [1, 2]
-!!
+
 # ============================================================
-# MODEL MULTITASKINGOWY (aktywny gdy use: true)
-# Backbone -> classifier_head (populacja) + regression_head (wiek)
+# ARCHITEKTURA MODELU
+#
+# Przełącznik trybu:
+#   multitask_model.use: true  → MultiTaskHerringModel (klasyfikacja populacji + regresja wieku)
+#   multitask_model.use: false → HerringModel (tylko klasyfikacja populacji)
+#
+# Zmiana backbone — zaktualizuj JEDNOCZEŚNIE model_name i image_size:
+#   resnet50         → image_size: 224
+#   swin_v2_b        → image_size: 256
+#   convnext_large   → image_size: 384
+#   regnet_y_32gf    → image_size: 384
+#   efficientnet_v2_l → image_size: 480
 # ============================================================
 multitask_model:
-  use: true
+  use: true                          # true = multitask (populacja + wiek) | false = tylko klasyfikacja
   backbone_model:
-    model_name: "swin_v2_b"    # resnet50: 224 | swin_v2_b: 256 | convnext_large/regnet: 384 | efficientnet_v2_l: 480
-    image_size: 256            # resnet50: 224 | swin_v2_b: 256 | convnext_large/regnet: 384 | efficientnet: 480
+    model_name: "swin_v2_b"
+    image_size: 256
     pretrained: true
-    freeze_encoder: false
+    freeze_encoder: false            # false = trenuj cały model | true = trenuj tylko głowy
     dropout_rate: 0.5
     weight_decay: 0.01
   classifier_head:
-    type: "linear"
     dropout_rate: 0.5
   regression_head:
-    type: "mlp"
     hidden_dim: 128
     dropout_rate: 0.3
   loss_weighting:
-    method: "uncertainty"      # "none" | "static" | "uncertainty" | "gradnorm"
-    static:
+    method: "uncertainty"            # "none" | "static" | "uncertainty" | "gradnorm"
+    static:                          # używane tylko gdy method: "static"
       classification: 1.0
       age: 0.3
   log_loss_components: true
 
-# ============================================================
-# MODEL KLASYFIKACYJNY (aktywny gdy multitask_model.use: false)
-# ============================================================
+# Aktywne tylko gdy multitask_model.use: false — musi być zsynchronizowane z backbone_model powyżej.
 base_model:
-  base_model: "resnet50"
-  image_size: 224
+  base_model: "swin_v2_b"
+  image_size: 256
   pretrained: true
   freeze_encoder: false
   dropout_rate: 0.5
@@ -62,7 +69,7 @@ base_model:
 # AUGMENTACJA DANYCH TRENINGOWYCH
 # ============================================================
 augmentation:
-  mode: "strong"
+  mode: "strong"                     # "base" = minimalna | "strong" = pełna augmentacja
   rotation: 30
   crop_scale: [0.8, 1.0]
   hflip_prob: 0.5
@@ -83,42 +90,44 @@ augmentation:
 training:
   loss_type:
     - ldam
-    # Dostepne: ldam | standard_ce | focal_loss_ageboost | class_balanced_focal
+    # Dostępne: ldam | standard_ce | focal_loss_ageboost | class_balanced_focal
     #           focal_tversky | ghm | seesaw | asymmetric_focal
     #           sample_weighted_ce | weighted_age_ce
-  stop_after_one_epoch: true   # true = test pipeline (1 epoka) | false = pelny trening
+  stop_after_one_epoch: true         # true = test pipeline (1 epoka) | false = pełny trening
   epochs: 150
   learning_rate: 0.00001
   device: "auto"
   early_stopping_patience: 5
   early_stopping_metric:
-    mode: "combined"       # "accuracy" | "combined"
-    accuracy_weight: 0.5   # waga dla (1 - val_acc/100), tylko przy mode="combined"
-    mae_weight: 0.5        # waga dla (val_mae / mae_reference), tylko przy mode="combined"
-    mae_reference: 3.0     # punkt odniesienia MAE [lata] — MAE modelu bez uczenia
+    mode: "combined"                 # "accuracy" = tylko klasyfikacja | "combined" = klasyfikacja + wiek
+    accuracy_weight: 0.5
+    mae_weight: 0.5
+    mae_reference: 3.0               # punkt odniesienia MAE [lata] — przybliżony MAE modelu bez uczenia
   checkpoint_dir: "checkpoints"
 
 # ============================================================
 # PREDYKCJA I WIZUALIZACJA STANDALONE
-# Nie uzywane podczas treningu. Uzywane przez src/predict.py, src/visualize.py.
-# Zaktualizuj model_path po treningu.
+# Używane przez: src/predict.py, src/visualize.py
+# NIE używane podczas treningu — run_comparison.py ignoruje tę sekcję.
+# Po treningu zaktualizuj model_path i target_layer dla aktywnego backbone.
 # ============================================================
 prediction:
-  model_path: "checkpoints/resnet50_ldam_multi/resnet50_ldam_ACC_XX.pth"
+  model_path: "checkpoints/swin_v2_b_ldam_multi/swin_v2_b_ldam_ACC_XX.pth"
   image_path: "data/embedded/test/1/example.jpg"
   results_dir: "results/gradcam"
   show_visualization: true
   save_results: true
-
-prediction_modes:
-  navigation:
-    image_dir: "data/embedded/test"
 
 visualization:
   methods: ['gradcam', 'gradcam++', 'guided_backprop']
   display_mode: 'matrix'
   matrix_cols: 3
   save_individual: False
-  target_layer: "base.layer4.2.conv3"   # resnet50: "base.layer4.2.conv3" | efficientnet: "base.features.8.0"
+  # target_layer per backbone:
+  #   resnet50:          "base.layer4.2.conv3"
+  #   swin_v2_b:         "base.layers.3.blocks.1.norm2"
+  #   efficientnet_v2_l: "base.features.8.0"
+  #   convnext_large:    "base.features.7.2.block.0"
+  target_layer: "base.layers.3.blocks.1.norm2"
   colormap: "jet"
   alpha: 0.5
