@@ -43,8 +43,8 @@ data:
 multitask_model:
   use: true                          # true = multitask (populacja + wiek) | false = tylko klasyfikacja
   backbone_model:
-    model_name: "swin_v2_b"
-    image_size: 256
+    model_name: "maxvit_base_tf_512"
+    image_size: 768
     pretrained: true
     freeze_encoder: false            # false = trenuj cały model | true = trenuj tylko głowy
     dropout_rate: 0.5
