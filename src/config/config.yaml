@@ -29,11 +29,16 @@ data:
 #   multitask_model.use: false → HerringModel (tylko klasyfikacja populacji)
 #
 # Zmiana backbone — zaktualizuj JEDNOCZEŚNIE model_name i image_size:
-#   resnet50         → image_size: 224
-#   swin_v2_b        → image_size: 256
-#   convnext_large   → image_size: 384
-#   regnet_y_32gf    → image_size: 384
-#   efficientnet_v2_l → image_size: 480
+#   resnet50                 → image_size: 224
+#   swin_v2_b                → image_size: 256
+#   convnext_large           → image_size: 384
+#   regnet_y_32gf            → image_size: 384
+#   efficientnet_v2_l        → image_size: 480
+#   maxvit_base_tf_512       → image_size: 768   [hybrid_768]       batch_size: 8   (wymaga timm)
+#   vit_large_patch14_dinov2 → image_size: 518   [advanced_dinov2]  batch_size: 8   (wymaga timm)
+#
+# UWAGA: modele timm pobierają wagi automatycznie przy pierwszym uruchomieniu (wymaga internetu).
+# Przy batch_size=32 (domyślne) obrazy 768/518 px spowodują OOM — zmień data.batch_size.
 # ============================================================
 multitask_model:
   use: true                          # true = multitask (populacja + wiek) | false = tylko klasyfikacja
@@ -124,10 +129,12 @@ visualization:
   matrix_cols: 3
   save_individual: False
   # target_layer per backbone:
-  #   resnet50:          "base.layer4.2.conv3"
-  #   swin_v2_b:         "base.layers.3.blocks.1.norm2"
-  #   efficientnet_v2_l: "base.features.8.0"
-  #   convnext_large:    "base.features.7.2.block.0"
+  #   resnet50:                 "base.layer4.2.conv3"
+  #   swin_v2_b:                "base.layers.3.blocks.1.norm2"
+  #   efficientnet_v2_l:        "base.features.8.0"
+  #   convnext_large:           "base.features.7.2.block.0"
+  #   maxvit_base_tf_512:       "base.stages.3.blocks.0"
+  #   vit_large_patch14_dinov2: "base.blocks.23.norm1"
   target_layer: "base.layers.3.blocks.1.norm2"
   colormap: "jet"
   alpha: 0.5

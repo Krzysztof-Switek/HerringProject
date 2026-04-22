@@ -97,6 +97,14 @@ class HerringModel(nn.Module):
         return self.base(x)
 
 def build_model(cfg: DictConfig) -> nn.Module:
+    from ..utils.config_helpers import get_active_model_name
+    from .timm_models import TIMM_MODELS, TimmHerringModel, TimmMultiTaskHerringModel
+
+    model_name = get_active_model_name(cfg)
+    if model_name in TIMM_MODELS:
+        if cfg.multitask_model.use:
+            return TimmMultiTaskHerringModel(cfg)
+        return TimmHerringModel(cfg)
     if cfg.multitask_model.use:
         from .multitask_model import MultiTaskHerringModel
         return MultiTaskHerringModel(cfg)
